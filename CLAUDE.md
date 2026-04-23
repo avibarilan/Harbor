@@ -79,3 +79,39 @@ HA exposes two API surfaces accessed via the same LLAT:
 - **Supervisor API** (`/api/hassio/...`): add-ons, OS/Supervisor/Core version info and updates, backups, host reboot/shutdown
 
 Supervisor endpoints are only present on **Home Assistant OS** and **Home Assistant Supervised** installation types. Routes that call Supervisor endpoints (system, updates, addons, backups) will return HA API errors on Container/Core installs — the frontend should handle this gracefully.
+
+## Release & Update Process
+
+### Tagging a release
+```bash
+# 1. Update VERSION file to the new version (e.g. 1.1.0)
+# 2. Commit the change
+git add VERSION && git commit -m "chore: bump version to 1.1.0"
+
+# 3. Tag and push — this triggers the GitHub Actions release workflow
+git tag v1.1.0 && git push origin main --tags
+```
+
+### GitHub Actions workflow (`.github/workflows/release.yml`)
+Triggers on `v*` tags. It:
+1. Verifies the tag version matches the `VERSION` file
+2. Builds a multi-platform Docker image (`linux/amd64`, `linux/arm64`) with `--build-arg VERSION=<semver>`
+3. Pushes to GHCR as `ghcr.io/avibarilan/harbor:latest` and `ghcr.io/avibarilan/harbor:v<version>`
+
+`GITHUB_TOKEN` is used automatically — no extra secrets needed.
+
+### Self-update mechanism
+- On startup (after 15 s) and every 6 hours, Harbor checks `https://api.github.com/repos/avibarilan/Harbor/releases/latest` and caches the result in `harbor_settings`.
+- Settings page → **Harbor Updates** section shows current/latest version and a "Check for updates" button.
+- When an update is available and the Docker socket is mounted, an **"Update to vX.X.X"** button appears.
+- Clicking it: Harbor pulls the new image, then launches a short-lived **helper container** (using the new image running `src/updateRunner.js`). The helper waits 8 s, stops + removes the old container, and starts the new one with the original port/volume/env config. The Docker socket must be mounted at `/var/run/docker.sock`.
+- The `HARBOR_VERSION` env var is set at image build time via `--build-arg`. Running outside Docker shows `dev`.
+- **Data safety**: volumes are preserved — the helper re-uses the exact same `HostConfig.Binds` from the inspected container, so `/data` is never touched.
+
+### Docker socket requirement
+```yaml
+# docker-compose.yml — already included:
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+```
+Without this mount, the update button is hidden and a note is shown explaining manual update is required.

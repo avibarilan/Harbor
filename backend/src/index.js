@@ -25,6 +25,7 @@ import systemRoutes from './routes/system.js';
 import searchRoutes from './routes/search.js';
 import auditRoutes from './routes/audit.js';
 import settingsRoutes from './routes/settings.js';
+import harborRoutes, { scheduleUpdateCheck } from './routes/harbor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -51,6 +52,7 @@ app.use('/api/instances', systemRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/harbor', harborRoutes);
 
 // Serve React build in production
 const publicDir = path.join(__dirname, '..', 'public');
@@ -71,6 +73,7 @@ async function start() {
 
   httpServer.listen(PORT, () => {
     console.log(`Harbor running on http://localhost:${PORT}`);
+    scheduleUpdateCheck();
   });
 }
 

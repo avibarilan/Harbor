@@ -23,5 +23,7 @@ COPY --from=frontend-build /app/backend/public ./public
 
 EXPOSE 3000
 ENV NODE_ENV=production
+ARG VERSION=dev
+ENV HARBOR_VERSION=${VERSION}
 
 CMD ["node", "src/index.js"]

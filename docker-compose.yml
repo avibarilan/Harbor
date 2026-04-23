@@ -9,8 +9,9 @@ services:
       - "3000:3000"
     environment:
       - JWT_SECRET=h4rb0r-super-secret-jwt-key-2026-avi-admin
-      - ENCRYPTION_KEY=H4rb0rEncryptK3y!!AviAdmin2026$$
+      - ENCRYPTION_KEY=H4rb0rEncryptK3y!!AviAdmin202626
       - PORT=3000
       - DATA_DIR=/data
     volumes:
       - /volume1/docker/Harbor/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -10,7 +10,11 @@
       "Bash(node -e \"import\\('./node_modules/better-sqlite3/lib/database.js'\\).then\\(m => console.log\\('ok'\\)\\).catch\\(e => console.log\\(e.message\\)\\)\")",
       "Bash(pkill -f \"node src/index.js\")",
       "Bash(npm run *)",
-      "Bash(docker build *)"
+      "Bash(docker build *)",
+      "Bash(node *)",
+      "Bash(echo \"harbor.js: $?\")",
+      "Bash(echo \"updateRunner.js: $?\")",
+      "Bash(python3 *)"
     ]
   }
 }
