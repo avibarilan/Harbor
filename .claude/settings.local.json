@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm --version)",
+      "Bash(node -e \"require\\('./node_modules/better-sqlite3'\\)\")",
+      "Bash(PORT=3001 JWT_SECRET=testsecret ENCRYPTION_KEY=12345678901234567890123456789012 DATA_DIR=./data node src/index.js)",
+      "Bash(curl -s http://localhost:3001/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"admin\",\"password\":\"changeme\"}')",
+      "Bash(npm rebuild *)",
+      "Bash(node -e \"import\\('./node_modules/better-sqlite3/lib/database.js'\\).then\\(m => console.log\\('ok'\\)\\).catch\\(e => console.log\\(e.message\\)\\)\")",
+      "Bash(pkill -f \"node src/index.js\")",
+      "Bash(npm run *)",
+      "Bash(docker build *)"
+    ]
+  }
+}

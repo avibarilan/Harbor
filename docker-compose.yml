@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  harbor:
+    build: .
+    container_name: harbor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - JWT_SECRET=h4rb0r-super-secret-jwt-key-2026-avi-admin
+      - ENCRYPTION_KEY=H4rb0rEncryptK3y!!AviAdmin2026$$
+      - PORT=3000
+      - DATA_DIR=/data
+    volumes:
+      - /volume1/docker/Harbor/data:/data

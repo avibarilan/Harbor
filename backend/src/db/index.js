@@ -1,0 +1,77 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+
+let db;
+
+export function getDb() {
+  if (!db) throw new Error('Database not initialized');
+  return db;
+}
+
+export function initDb() {
+  const dataDir = process.env.DATA_DIR || './data';
+  fs.mkdirSync(dataDir, { recursive: true });
+  const dbPath = path.join(dataDir, 'harbor.db');
+
+  db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      username    TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sites (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT NOT NULL,
+      customer_name TEXT,
+      tags          TEXT DEFAULT '[]',
+      notes         TEXT DEFAULT '',
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS instances (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id           INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      name              TEXT NOT NULL,
+      url               TEXT NOT NULL,
+      token_encrypted   TEXT NOT NULL,
+      installation_type TEXT,
+      status            TEXT NOT NULL DEFAULT 'disconnected',
+      last_seen         TEXT,
+      ha_version        TEXT,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS entity_cache (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id     INTEGER NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+      entity_id       TEXT NOT NULL,
+      state           TEXT,
+      attributes_json TEXT DEFAULT '{}',
+      last_updated    TEXT,
+      UNIQUE(instance_id, entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id INTEGER,
+      site_id     INTEGER,
+      action      TEXT NOT NULL,
+      details     TEXT,
+      timestamp   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS harbor_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+
+  return db;
+}
