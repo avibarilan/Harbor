@@ -19,7 +19,10 @@
       "Bash(cmd /c \"dir X:\\\\Docker\\\\Harbor\\\\frontend\\\\src /b\")",
       "Bash(cmd *)",
       "Bash(DATA_DIR=\"X:/Docker/Harbor/data\" node test-supervisor.js)",
-      "Bash(DATA_DIR=\"X:/Docker/Harbor/data\" ENCRYPTION_KEY=\"H4rb0rEncryptK3y!!AviAdmin202626\" node test-supervisor.js)"
+      "Bash(DATA_DIR=\"X:/Docker/Harbor/data\" ENCRYPTION_KEY=\"H4rb0rEncryptK3y!!AviAdmin202626\" node test-supervisor.js)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
