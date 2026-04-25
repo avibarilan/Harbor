@@ -12,5 +12,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY app/ .
 
-COPY rootfs /
-RUN chmod a+x /etc/services.d/harbor-companion/run
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
+
+CMD ["/run.sh"]
