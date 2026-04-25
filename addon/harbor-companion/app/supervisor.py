@@ -1,8 +1,34 @@
 import os
+import logging
+from pathlib import Path
+
 import httpx
 
-SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+log = logging.getLogger("harbor-companion")
+
 BASE_URL = "http://supervisor"
+
+
+def _load_supervisor_token() -> str:
+    raw = os.environ.get("SUPERVISOR_TOKEN", "NOT_FOUND")
+    print(f"[supervisor] os.environ.get('SUPERVISOR_TOKEN', 'NOT_FOUND') = {raw!r}", flush=True)
+
+    token = raw.strip() if raw != "NOT_FOUND" else ""
+    if token:
+        return token
+
+    secret_path = Path("/run/secrets/SUPERVISOR_TOKEN")
+    if secret_path.exists():
+        token = secret_path.read_text().strip()
+        if token:
+            log.info("SUPERVISOR_TOKEN loaded from /run/secrets/SUPERVISOR_TOKEN")
+            return token
+
+    log.warning("SUPERVISOR_TOKEN not found in environment or /run/secrets/SUPERVISOR_TOKEN")
+    return ""
+
+
+SUPERVISOR_TOKEN = _load_supervisor_token()
 
 
 def _client():
