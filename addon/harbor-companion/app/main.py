@@ -27,7 +27,7 @@ def load_or_create_secret() -> str:
     return s
 
 
-app = FastAPI(title="Harbor Companion", version=VERSION, root_path="/harbor-companion")
+app = FastAPI(title="Harbor Companion", version=VERSION)
 
 
 @app.on_event("startup")
@@ -39,6 +39,16 @@ async def startup():
     log.info(f"X-Harbor-Secret: {_secret}")
     log.info("Copy this secret into Harbor → Instance Settings → Companion")
     log.info("=" * 60)
+
+
+@app.middleware("http")
+async def strip_prefix(request: Request, call_next):
+    if request.url.path.startswith("/harbor-companion"):
+        scope = request.scope
+        scope["path"] = scope["path"][len("/harbor-companion"):]
+        if not scope["path"]:
+            scope["path"] = "/"
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -230,4 +240,4 @@ async def restart_addon(slug: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7779, log_level="info", root_path="/harbor-companion")
+    uvicorn.run(app, host="0.0.0.0", port=7779, log_level="info")
