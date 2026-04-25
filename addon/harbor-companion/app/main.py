@@ -27,7 +27,7 @@ def load_or_create_secret() -> str:
     return s
 
 
-app = FastAPI(title="Harbor Companion", version=VERSION)
+app = FastAPI(title="Harbor Companion", version=VERSION, root_path="/harbor-companion")
 
 
 @app.on_event("startup")
@@ -230,4 +230,4 @@ async def restart_addon(slug: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7779, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=7779, log_level="info", root_path="/harbor-companion")
