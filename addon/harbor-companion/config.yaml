@@ -15,5 +15,8 @@ ports_description:
   7779/tcp: Harbor Companion API
 map:
   - data:rw
+hassio_api: true
+hassio_role: manager
+homeassistant_api: true
 options: {}
 schema: {}
