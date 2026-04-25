@@ -14,5 +14,3 @@ COPY app/ .
 
 COPY rootfs /
 RUN chmod a+x /etc/services.d/harbor-companion/run
-
-CMD ["/etc/services.d/harbor-companion/run"]
