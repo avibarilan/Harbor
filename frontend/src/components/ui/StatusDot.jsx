@@ -8,14 +8,18 @@ const colors = {
 };
 
 export default function StatusDot({ status = 'unknown', size = 'md' }) {
+  const isConnected = status === 'connected';
   return (
-    <span
-      className={clsx(
-        'rounded-full shrink-0',
-        colors[status] ?? colors.unknown,
-        size === 'sm' ? 'w-1.5 h-1.5' : 'w-2 h-2'
+    <span className="relative inline-flex shrink-0" style={{ width: size === 'sm' ? 6 : 8, height: size === 'sm' ? 6 : 8 }}>
+      {isConnected && (
+        <span
+          className={clsx('absolute inset-0 rounded-full opacity-75 status-pulse', colors.connected)}
+        />
       )}
-      title={status}
-    />
+      <span
+        className={clsx('relative inline-flex rounded-full w-full h-full', colors[status] ?? colors.unknown)}
+        title={status}
+      />
+    </span>
   );
 }

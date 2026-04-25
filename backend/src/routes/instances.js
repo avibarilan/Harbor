@@ -3,6 +3,7 @@ import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import { logAudit } from '../utils/audit.js';
+import { checkCloudflare } from '../utils/cloudflare.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -16,8 +17,31 @@ async function testConnection(url, token) {
   return res.json();
 }
 
+// Determine installation type from /api/config without needing Supervisor access.
+// The 'hassio' component is only loaded on HAOS and Supervised installs, making
+// it a reliable indicator that doesn't require hitting /api/hassio/* endpoints
+// (which are blocked by Cloudflare and other external proxies).
+function inferInstallationType(config) {
+  if (config.installation_type && config.installation_type !== 'unknown') {
+    return config.installation_type;
+  }
+  const components = config.components || [];
+  if (components.includes('hassio')) {
+    // hassio present = Supervisor is running.
+    // homeassistant_hardware is only loaded on HAOS (not Supervised).
+    return components.includes('homeassistant_hardware')
+      ? 'Home Assistant OS'
+      : 'Home Assistant Supervised';
+  }
+  // No hassio = Container or Core install
+  return config.installation_type || 'unknown';
+}
+
+const INST_COLS = 'id, site_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_url, companion_enabled, created_at';
+
 router.post('/', async (req, res) => {
-  const { site_id, name, url, token } = req.body;
+  const { site_id, name, url } = req.body;
+  const token = (req.body.token || '').trim();
   if (!site_id || !name || !url || !token) return res.status(400).json({ error: 'site_id, name, url, token required' });
 
   const site = getDb().prepare('SELECT * FROM sites WHERE id = ?').get(site_id);
@@ -33,7 +57,7 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const installationType = config.installation_type || 'unknown';
+    const installationType = inferInstallationType(config);
     const haVersion = config.version || null;
     const tokenEncrypted = encrypt(token);
 
@@ -42,14 +66,23 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, 'disconnected', ?)
     `).run(site_id, name, cleanUrl, tokenEncrypted, installationType, haVersion);
 
+    const instId = result.lastInsertRowid;
+
+    // Cloudflare detection in background (non-blocking)
+    checkCloudflare(cleanUrl).then(proxied => {
+      if (proxied) {
+        getDb().prepare('UPDATE instances SET cloudflare_proxied = 1 WHERE id = ?').run(instId);
+      }
+    }).catch(() => {});
+
     logAudit({
-      instanceId: result.lastInsertRowid,
+      instanceId: instId,
       siteId: site_id,
       action: 'instance_adopted',
       details: `Instance "${name}" adopted (${installationType}, v${haVersion})`,
     });
 
-    const inst = getDb().prepare('SELECT id, site_id, name, url, installation_type, status, last_seen, ha_version, created_at FROM instances WHERE id = ?').get(result.lastInsertRowid);
+    const inst = getDb().prepare(`SELECT ${INST_COLS} FROM instances WHERE id = ?`).get(instId);
 
     process.emit('harbor:instance_added', inst.id);
     res.status(201).json(inst);
@@ -60,13 +93,14 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/:id', (req, res) => {
-  const inst = getDb().prepare('SELECT id, site_id, name, url, installation_type, status, last_seen, ha_version, created_at FROM instances WHERE id = ?').get(req.params.id);
+  const inst = getDb().prepare(`SELECT ${INST_COLS} FROM instances WHERE id = ?`).get(req.params.id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
   res.json(inst);
 });
 
 router.put('/:id', async (req, res) => {
-  const { name, url, token } = req.body;
+  const { name, url } = req.body;
+  const token = req.body.token ? req.body.token.trim() : undefined;
   const inst = getDb().prepare('SELECT * FROM instances WHERE id = ?').get(req.params.id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
 
@@ -79,7 +113,7 @@ router.put('/:id', async (req, res) => {
     try {
       const config = await testConnection(cleanUrl, token);
       haVersion = config.version || haVersion;
-      installationType = config.installation_type || installationType;
+      installationType = inferInstallationType(config) || installationType;
     } catch (e) {
       return res.status(400).json({ error: `Connection test failed: ${e.message}` });
     }
@@ -91,6 +125,7 @@ router.put('/:id', async (req, res) => {
       logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'instance_token_updated', details: `Token updated for "${inst.name}"` });
     }
 
+    const newUrl = url ? url.replace(/\/$/, '') : null;
     getDb().prepare(`
       UPDATE instances SET
         name = COALESCE(?, name),
@@ -99,11 +134,19 @@ router.put('/:id', async (req, res) => {
         ha_version = ?,
         installation_type = ?
       WHERE id = ?
-    `).run(name, url ? url.replace(/\/$/, '') : null, tokenEncrypted, haVersion, installationType, req.params.id);
+    `).run(name, newUrl, tokenEncrypted, haVersion, installationType, req.params.id);
+
+    // Re-check Cloudflare if URL changed
+    if (url) {
+      const checkUrl = newUrl || inst.url;
+      checkCloudflare(checkUrl).then(proxied => {
+        getDb().prepare('UPDATE instances SET cloudflare_proxied = ? WHERE id = ?').run(proxied ? 1 : 0, req.params.id);
+      }).catch(() => {});
+    }
 
     if (token) process.emit('harbor:instance_updated', inst.id);
 
-    const updated = getDb().prepare('SELECT id, site_id, name, url, installation_type, status, last_seen, ha_version, created_at FROM instances WHERE id = ?').get(req.params.id);
+    const updated = getDb().prepare(`SELECT ${INST_COLS} FROM instances WHERE id = ?`).get(req.params.id);
     res.json(updated);
   } catch (err) {
     console.error('[instances] update error:', err);
@@ -126,18 +169,18 @@ router.post('/:id/test', async (req, res) => {
   let token, url;
   if (req.params.id === '0') {
     if (!req.body.url || !req.body.token) return res.status(400).json({ error: 'url and token required' });
-    token = req.body.token;
+    token = req.body.token.trim();
     url = req.body.url.replace(/\/$/, '');
   } else {
     const inst = getDb().prepare('SELECT * FROM instances WHERE id = ?').get(req.params.id);
     if (!inst) return res.status(404).json({ error: 'Instance not found' });
-    token = req.body.token ? req.body.token : decrypt(inst.token_encrypted);
+    token = req.body.token ? req.body.token.trim() : decrypt(inst.token_encrypted).trim();
     url = (req.body.url || inst.url).replace(/\/$/, '');
   }
 
   try {
     const config = await testConnection(url, token);
-    res.json({ ok: true, version: config.version, installation_type: config.installation_type });
+    res.json({ ok: true, version: config.version, installation_type: inferInstallationType(config) });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }

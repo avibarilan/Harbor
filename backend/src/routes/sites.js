@@ -9,7 +9,7 @@ router.use(requireAuth);
 router.get('/', (req, res) => {
   const db = getDb();
   const sites = db.prepare('SELECT * FROM sites ORDER BY name').all();
-  const instances = db.prepare('SELECT id, site_id, name, url, installation_type, status, last_seen, ha_version FROM instances').all();
+  const instances = db.prepare('SELECT id, site_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_enabled FROM instances').all();
 
   const instBySite = {};
   for (const inst of instances) {

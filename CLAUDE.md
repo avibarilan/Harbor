@@ -35,21 +35,66 @@ On first run with no users in the DB, the default admin account `admin / changem
 
 ### Backend key patterns
 
-**Database** (`backend/src/db/index.js`): single `better-sqlite3` instance, WAL mode, foreign keys on. Always get it via `getDb()` — never import the `db` variable directly. Schema is created inline in `initDb()`.
+**Database** (`backend/src/db/index.js`): single `better-sqlite3` instance, WAL mode, foreign keys on. Always get it via `getDb()` — never import the `db` variable directly. Schema is created inline in `initDb()`. Post-v1 column additions are done via `ALTER TABLE` with a `try/catch` immediately after schema creation (SQLite has no `IF NOT EXISTS` for `ADD COLUMN`).
 
-**HA API proxy** (`backend/src/utils/haApi.js`): all routes that talk to Home Assistant use `haGet`, `haPost`, `haDelete` from this module. They decrypt the LLAT, attach it as `Authorization: Bearer`, and throw errors with `.status` set so route handlers can forward the status code. For commands only available via HA's WebSocket API (user management), use `callHaWs` — it opens a one-shot authenticated WS connection, sends the command, and resolves/rejects the promise.
+**instances table columns**: `id, site_id, name, url, token_encrypted, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_url, companion_secret, companion_enabled, created_at`. The `cloudflare_proxied` column (INTEGER 0/1) was added in v1.1 via migration. The `companion_url`, `companion_secret` (encrypted), and `companion_enabled` (INTEGER 0/1) columns were added in v1.2 via migration.
+
+**HA API proxy** (`backend/src/utils/haApi.js`): all routes that talk to Home Assistant use `haGet`, `haPost`, `haDelete` from this module. They decrypt the LLAT, attach it as `Authorization: Bearer`, and throw errors with `.status` set so route handlers can forward the status code. `baseUrl(inst)` (private helper) trims trailing slashes before building URLs — all URL construction goes through it. For commands only available via HA's WebSocket API (user management, entity/area registry), use `callHaWs` — it opens a one-shot authenticated WS connection, sends the command, and resolves/rejects the promise. For Supervisor-level operations when the companion is configured, use `callCompanion(inst, path, method, body)` or `streamCompanion(inst, path)` — these decrypt `companion_secret`, attach `X-Harbor-Secret`, and forward to the companion URL.
 
 **Token encryption** (`backend/src/utils/encryption.js`): LLAT tokens are encrypted with AES-256-CBC before being written to SQLite. The IV is prepended to the ciphertext as `iv_hex:enc_hex`. Never store or log a raw token.
 
 **Audit logging** (`backend/src/utils/audit.js`): every significant user action must call `logAudit({ instanceId, siteId, action, details })`. All routes already do this — maintain the pattern for any new actions.
 
-**WebSocket pipeline**: `WebSocketManager` (extends `EventEmitter`) maintains one persistent HA WebSocket connection per adopted instance. On connect it subscribes to `state_changed` and bulk-fetches all states via `get_states` (msg id 2). It writes every state change to `entity_cache` and emits `status_update` / `state_changed` events. `harborWs.js` opens a `WebSocketServer` at `/ws`, authenticates browser clients via JWT query param, sends a `status_snapshot` on connect, then relays both event types to all connected browser clients.
+**WebSocket pipeline**: `WebSocketManager` (extends `EventEmitter`) maintains one persistent HA WebSocket connection per adopted instance. On connect it subscribes to `state_changed` and bulk-fetches all states via `get_states` (msg id 2). It writes every state change to `entity_cache` and emits `status_update` / `state_changed` events. On every successful `auth_ok`, `_refreshInstanceMeta` fetches `/api/config` to re-detect `installation_type` and `ha_version`, and updates the DB if they changed. `harborWs.js` opens a `WebSocketServer` at `/ws`, authenticates browser clients via JWT query param, sends a `status_snapshot` on connect, then relays both event types to all connected browser clients.
 
 **Instance lifecycle signals**: routes communicate with `WebSocketManager` via `process.emit('harbor:instance_added' | 'harbor:instance_updated' | 'harbor:instance_removed', id)`. The manager listens for these in `start()`.
 
 **Route organisation**: all instance-scoped routes are mounted at `/api/instances` in `index.js`. Each resource lives in its own file (`entities.js`, `automations.js`, etc.) and receives `/:id/...` paths relative to that mount.
 
 **`POST /api/instances/0/test`**: the `id=0` sentinel means an ad-hoc connectivity test (used by the adoption wizard before the instance exists in the DB). The route handles this case explicitly before the normal "look up instance" path.
+
+**Cloudflare detection** (`backend/src/utils/cloudflare.js`): `checkCloudflare(instanceUrl)` does a DNS A-record lookup on the hostname and checks the resolved IP against Cloudflare's published IPv4 ranges (`https://www.cloudflare.com/ips-v4`). Ranges are cached in `harbor_settings` with key `cloudflare_ip_ranges` for 24 hours. Detection runs in the background after adoption and on `PUT /:id` when the URL changes. Result is stored as `cloudflare_proxied = 1` in the instances table. Local IPs and bare IP addresses are never sent to Cloudflare's range list.
+
+### Harbor Companion add-on
+
+The `/addon/harbor-companion` directory contains a Home Assistant add-on that bridges Harbor and the Supervisor API. It runs inside HA on port 7779 and exposes an HTTP API protected by a shared secret (`X-Harbor-Secret` header). The secret is generated on first run and stored in `/data/harbor_secret.txt`.
+
+**Add-on structure**:
+- `config.yaml` — HA add-on manifest (slug: `harbor_companion`, port 7779)
+- `Dockerfile` — Alpine + Python + FastAPI, built by HA's add-on system
+- `app/main.py` — FastAPI app; validates `X-Harbor-Secret` via middleware on all routes except `/health`
+- `app/supervisor.py` — async Supervisor API client using `SUPERVISOR_TOKEN` (injected by HA)
+- `rootfs/etc/services.d/harbor-companion/run` — s6 service runner
+
+**Backend companion proxy** (`backend/src/utils/haApi.js`): `callCompanion(inst, path, method, body)` decrypts `companion_secret` and makes requests to `{companion_url}{path}`. `streamCompanion(inst, path)` returns the raw fetch response for binary streaming (backup downloads). Both throw errors with `.status` for route handlers.
+
+**Companion routes** (`backend/src/routes/companion.js`): `GET/POST/DELETE /api/instances/:id/companion` manages the companion configuration. `POST` tests connectivity before saving (calls `/health` on the companion). Secret is stored encrypted in the DB just like LLAT tokens.
+
+**Tab unlocking**: When `companion_enabled = 1` on an instance, the backups, addons, updates, and system routes proxy to the companion instead of returning the "not available" response. The frontend tab components check `inst.companion_enabled` and render either the full management UI or the "Open in HA" placeholder accordingly.
+
+**Dashboard / action buttons**: When `companion_enabled` is true, a `PlugZap` icon appears on dashboard instance rows, and Reboot + Shutdown buttons appear in `InstanceActionButtons` alongside the existing Restart button.
+
+### Supervisor API — external LLAT limitation
+
+The Home Assistant Supervisor API (`/api/hassio/…`) is **not accessible** through an external Long-Lived Access Token (LLAT). Requests return 401. When the Harbor Companion add-on is **not** configured for an instance, all Supervisor-dependent features fall back to "Open in Home Assistant" placeholders:
+
+- **Backups tab** — `BackupsTab.jsx` shows a redirect prompt. `routes/backups.js` returns `[]`.
+- **Add-ons tab** — `AddonsTab.jsx` shows a redirect prompt. `routes/addons.js` returns `[]`.
+- **Updates tab** — `UpdatesTab.jsx` shows a redirect prompt. `routes/updates.js` returns `{ supervisor_unavailable: true }`.
+- **System tab** — `SystemTab.jsx` shows basic info from `/api/config` (version, location, timezone, units). No logs viewer. `routes/system.js` exposes `GET /:id/sysconfig`.
+- **Reboot / Shutdown** — only available when companion is enabled (`POST /:id/actions/reboot` and `POST /:id/actions/shutdown`). When companion is disabled, only **Restart** (`POST /api/services/homeassistant/restart`) is shown.
+- `installation_type` badge removed from instance detail header. The field is still stored and used internally by `inferInstallationType` (component-based, reads `hassio` and `homeassistant_hardware` from `/api/config`), but never shown in UI.
+
+Do not add any new routes that call `/api/hassio/…` directly — they will always 401. Use the Harbor Companion add-on path (`callCompanion`) for Supervisor features.
+
+### installation_type detection
+
+`/api/config` returns `installation_type` in most HA versions. When it's absent or `'unknown'`, Harbor infers it from the components list:
+- `hassio` in components + `homeassistant_hardware` → `'Home Assistant OS'`
+- `hassio` in components only → `'Home Assistant Supervised'`
+- neither → `config.installation_type` or `'unknown'`
+
+This runs in `inferInstallationType` (shared by `routes/instances.js` and `WebSocketManager._refreshInstanceMeta`). No Supervisor API calls are made.
 
 ### Frontend key patterns
 
@@ -59,37 +104,42 @@ On first run with no users in the DB, the default admin account `admin / changem
 - `AuthContext` — JWT token in `localStorage` as `harbor_token`, auto-redirects to `/login` on 401
 - `ThemeContext` — `dark`/`light` class toggled on `<html>`, `spacious`/`compact` density, both in `localStorage`
 - `WsContext` — single browser WebSocket to `/ws?token=…`; exposes `statuses` (Map of instanceId → status string) and `subscribe(instanceId, handler)` for per-instance `state_changed` listeners
-- `SitesContext` — fetches `/api/sites` once, shared by Sidebar and Dashboard; call `refresh()` after mutations
+- `SitesContext` — fetches `/api/sites` once, shared by Sidebar and Dashboard; call `refresh()` after mutations. The sites API includes `cloudflare_proxied` on each instance object.
 - `ToastContext` — call `toast(message, type)` anywhere inside the provider tree
 
 **API client** (`frontend/src/api/client.js`): `api.get/post/put/delete` — thin wrappers that attach the JWT and throw on non-2xx. `downloadFile(path, filename)` streams a blob to the browser's download mechanism.
 
-**CSS utilities** (`frontend/src/index.css`): Tailwind component classes are defined here — `.btn`, `.btn-sm/md/lg`, `.btn-primary/secondary/danger/ghost`, `.card`, `.input`, `.label`, `.badge`, `.badge-{green|red|orange|blue|gray|yellow}`. Use these instead of raw Tailwind for interactive elements.
+**CSS utilities** (`frontend/src/index.css`): Tailwind component classes are defined here — `.btn`, `.btn-sm/md/lg`, `.btn-primary/secondary/danger/ghost`, `.card`, `.input`, `.label`, `.badge`, `.badge-{green|red|orange|blue|gray|yellow}`. Also defines `.status-pulse` (pulsing animation for connected status dots) and `.people-panel` (slide-in animation for the people presence hover panel).
 
-**Status dot colours**: `connected` = green, `disconnected` = red, `auth_failed` = orange, `unknown` = gray. These are encoded in `StatusDot.jsx` and `WsContext`.
+**Status dot colours**: `connected` = green (with pulse animation), `disconnected` = red, `auth_failed` = orange, `unknown` = gray. Encoded in `StatusDot.jsx`.
 
-**Instance actions gating**: Restart is always available. Reboot and Shutdown are only shown/enabled when `installation_type === 'Home Assistant OS'`. Action buttons are disabled when `status !== 'connected'` with an "Instance offline" tooltip. This logic lives in `InstanceActionButtons.jsx` and must be preserved everywhere instance actions appear.
+**Instance actions**: Only **Restart** is available (`InstanceActionButtons.jsx`). The button is disabled when `status !== 'connected'` with an "Instance offline" tooltip. Reboot and Shutdown were removed because they required the Supervisor API.
 
-**`useInstanceMeta(instanceId, status)`** (`frontend/src/hooks/useInstanceMeta.js`): fetches update count and latest backup date for a single instance. Only fires when `status === 'connected'`. Used on dashboard cards to show update/backup warning badges without blocking render.
+**`usePeoplePresence(instanceId, status, enabled)`** (`frontend/src/hooks/useInstanceMeta.js`): lazily fetches `person.*` entities from the entity cache when `enabled` is true; used by dashboard cards to show presence on hover. `useInstanceMeta` is a stub that returns empty values (backup/updates badges removed).
 
-### Supervisor API vs standard REST API
+**Dashboard design** (`DashboardPage.jsx`): site-grouped cards — one card per site, with instance rows stacked inside. Each card has:
+- 4-px left border accent: green (all connected), red (any disconnected), orange (any auth_failed) — worst status wins
+- Site name header (large) + customer name (small)
+- Per instance: StatusDot + instance name, HA version, Cloudflare icon (`Cloud` from lucide), Restart button, Open-in-HA link
+- Disconnected instance rows: grayed out, "Last seen X ago" below name
+- Auth-failed instance rows: orange badge + "Update token in Settings" hint
+- People presence panel: animates in on hover using `usePeoplePresence`; shows 🏠/📍 per person entity
+- Hover: card lifts (`hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200`)
+- Empty state (no instances): Anchor icon, "No instances yet", "Add Instance" button
+Fleet summary bar: Sites / Instances / Online / Offline pills — Online and Offline are clickable filters. Tag filter pills below if any sites have tags.
 
-HA exposes two API surfaces accessed via the same LLAT:
-- **Standard REST** (`/api/...`): entities, services, automations, scripts, scenes, error log
-- **Supervisor API** (`/api/hassio/...`): add-ons, OS/Supervisor/Core version info and updates, backups, host reboot/shutdown
-
-Supervisor endpoints are only present on **Home Assistant OS** and **Home Assistant Supervised** installation types. Routes that call Supervisor endpoints (system, updates, addons, backups) will return HA API errors on Container/Core installs — the frontend should handle this gracefully.
+**Entities tab area grouping** (`EntitiesTab.jsx`): fetches `/api/instances/:id/entities/areas` (which uses `callHaWs` with `config/area_registry/list` and `config/entity_registry/list`) alongside the entity cache. Groups the filtered entities by area using collapsible `AreaSection` components. Entities with no `area_id` go into "Unassigned". Domain filter pills work across all areas simultaneously. Falls back to flat grid if area data is unavailable.
 
 ## Release & Update Process
 
 ### Tagging a release
 ```bash
-# 1. Update VERSION file to the new version (e.g. 1.1.0)
+# 1. Update VERSION file to the new version (e.g. 1.2.0)
 # 2. Commit the change
-git add VERSION && git commit -m "chore: bump version to 1.1.0"
+git add VERSION && git commit -m "chore: bump version to 1.2.0"
 
 # 3. Tag and push — this triggers the GitHub Actions release workflow
-git tag v1.1.0 && git push origin main --tags
+git tag v1.2.0 && git push origin main --tags
 ```
 
 ### GitHub Actions workflow (`.github/workflows/release.yml`)

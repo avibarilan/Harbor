@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { getInstance, haGet, haPost } from '../utils/haApi.js';
+import { getInstance, callCompanion } from '../utils/haApi.js';
 import { logAudit } from '../utils/audit.js';
 
 const router = Router();
@@ -8,21 +8,22 @@ router.use(requireAuth);
 
 router.get('/:id/addons', async (req, res) => {
   const inst = getInstance(req.params.id);
+  if (!inst.companion_enabled) return res.json([]);
   try {
-    const data = await haGet(inst, '/api/hassio/addons');
-    res.json(data?.data?.addons || []);
+    const data = await callCompanion(inst, '/addons');
+    res.json(data);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-router.post('/:id/addons/:addon_slug/update', async (req, res) => {
+router.post('/:id/addons/:slug/restart', async (req, res) => {
   const inst = getInstance(req.params.id);
-  const { addon_slug } = req.params;
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
-    await haPost(inst, `/api/hassio/addons/${addon_slug}/update`);
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'addon_update_triggered', details: `Add-on ${addon_slug} update triggered` });
-    res.json({ ok: true });
+    const data = await callCompanion(inst, `/addons/${req.params.slug}/restart`, 'POST');
+    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'addon_restarted', details: `Add-on ${req.params.slug} restarted` });
+    res.json(data);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }

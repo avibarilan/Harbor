@@ -1,4 +1,4 @@
-import { RotateCcw, Power, PowerOff } from 'lucide-react';
+import { RotateCcw, PowerOff, Power } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
@@ -7,76 +7,108 @@ import Tooltip from './Tooltip.jsx';
 
 export default function InstanceActionButtons({ instance, disabled }) {
   const { toast } = useToast();
-  const [confirm, setConfirm] = useState(null); // { action, label, description }
-  const isHaos = instance.installation_type === 'Home Assistant OS';
+  const [restartConfirm, setRestartConfirm] = useState(false);
+  const [rebootConfirm, setRebootConfirm] = useState(false);
+  const [shutdownConfirm, setShutdownConfirm] = useState(false);
   const offline = disabled || instance.status !== 'connected';
+  const companionEnabled = !!instance.companion_enabled;
 
-  const actions = {
-    restart:  { fn: () => api.post(`/instances/${instance.id}/actions/restart`),  successMsg: 'Restart triggered' },
-    reboot:   { fn: () => api.post(`/instances/${instance.id}/actions/reboot`),   successMsg: 'Reboot triggered' },
-    shutdown: { fn: () => api.post(`/instances/${instance.id}/actions/shutdown`), successMsg: 'Shutdown triggered' },
-  };
-
-  const handleAction = async (action) => {
+  const handleRestart = async () => {
     try {
-      await actions[action].fn();
-      toast(actions[action].successMsg, 'success');
+      await api.post(`/instances/${instance.id}/actions/restart`);
+      toast('Restart triggered', 'success');
     } catch (e) {
       toast(e.message, 'error');
     }
-    setConfirm(null);
+    setRestartConfirm(false);
   };
 
-  const tip = offline ? 'Instance offline' : null;
+  const handleReboot = async () => {
+    try {
+      await api.post(`/instances/${instance.id}/actions/reboot`);
+      toast('Host reboot triggered', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    setRebootConfirm(false);
+  };
+
+  const handleShutdown = async () => {
+    try {
+      await api.post(`/instances/${instance.id}/actions/shutdown`);
+      toast('Host shutdown triggered', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    setShutdownConfirm(false);
+  };
 
   return (
     <>
-      <div className="flex items-center gap-1">
-        <Tooltip content={tip || 'Restart Core'}>
-          <button
-            disabled={offline}
-            onClick={(e) => { e.stopPropagation(); e.preventDefault(); setConfirm({ action: 'restart', label: 'Restart', description: `Restart Home Assistant Core on "${instance.name}"?` }); }}
-            className="btn-ghost btn-sm"
-          >
-            <RotateCcw size={13} />
-          </button>
-        </Tooltip>
-        {isHaos && (
-          <>
-            <Tooltip content={tip || 'Reboot host'}>
-              <button
-                disabled={offline}
-                onClick={(e) => { e.stopPropagation(); e.preventDefault(); setConfirm({ action: 'reboot', label: 'Reboot host', description: `Reboot the host machine for "${instance.name}"? This will cause a short outage.` }); }}
-                className="btn-ghost btn-sm"
-              >
-                <Power size={13} />
-              </button>
-            </Tooltip>
-            <Tooltip content={tip || 'Shutdown host'}>
-              <button
-                disabled={offline}
-                onClick={(e) => { e.stopPropagation(); e.preventDefault(); setConfirm({ action: 'shutdown', label: 'Shutdown host', description: `Shut down the host for "${instance.name}"? You will need physical access to restart it.` }); }}
-                className="btn-ghost btn-sm"
-              >
-                <PowerOff size={13} />
-              </button>
-            </Tooltip>
-          </>
-        )}
-      </div>
-
-      {confirm && (
-        <ConfirmDialog
-          open
-          title={confirm.label}
-          confirmLabel={confirm.label}
-          danger={confirm.action !== 'restart'}
-          onClose={() => setConfirm(null)}
-          onConfirm={() => handleAction(confirm.action)}
+      <Tooltip content={offline ? 'Instance offline' : 'Restart Core'}>
+        <button
+          disabled={offline}
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); setRestartConfirm(true); }}
+          className="btn-ghost btn-sm"
         >
-          {confirm.description}
-        </ConfirmDialog>
+          <RotateCcw size={13} />
+        </button>
+      </Tooltip>
+
+      {companionEnabled && (
+        <>
+          <Tooltip content={offline ? 'Instance offline' : 'Reboot host'}>
+            <button
+              disabled={offline}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); setRebootConfirm(true); }}
+              className="btn-ghost btn-sm"
+            >
+              <Power size={13} />
+            </button>
+          </Tooltip>
+          <Tooltip content={offline ? 'Instance offline' : 'Shutdown host'}>
+            <button
+              disabled={offline}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); setShutdownConfirm(true); }}
+              className="btn-ghost btn-sm"
+            >
+              <PowerOff size={13} />
+            </button>
+          </Tooltip>
+        </>
       )}
+
+      <ConfirmDialog
+        open={restartConfirm}
+        title="Restart Home Assistant"
+        confirmLabel="Restart"
+        onClose={() => setRestartConfirm(false)}
+        onConfirm={handleRestart}
+      >
+        Restart Home Assistant Core on &ldquo;{instance.name}&rdquo;?
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={rebootConfirm}
+        title="Reboot host"
+        confirmLabel="Reboot"
+        danger
+        onClose={() => setRebootConfirm(false)}
+        onConfirm={handleReboot}
+      >
+        Reboot the host running &ldquo;{instance.name}&rdquo;? The system will be briefly unavailable.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={shutdownConfirm}
+        title="Shutdown host"
+        confirmLabel="Shutdown"
+        danger
+        onClose={() => setShutdownConfirm(false)}
+        onConfirm={handleShutdown}
+      >
+        Shut down the host running &ldquo;{instance.name}&rdquo;? You will need physical access to power it back on.
+      </ConfirmDialog>
     </>
   );
 }

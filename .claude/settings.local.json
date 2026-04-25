@@ -14,7 +14,12 @@
       "Bash(node *)",
       "Bash(echo \"harbor.js: $?\")",
       "Bash(echo \"updateRunner.js: $?\")",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(npx vite *)",
+      "Bash(cmd /c \"dir X:\\\\Docker\\\\Harbor\\\\frontend\\\\src /b\")",
+      "Bash(cmd *)",
+      "Bash(DATA_DIR=\"X:/Docker/Harbor/data\" node test-supervisor.js)",
+      "Bash(DATA_DIR=\"X:/Docker/Harbor/data\" ENCRYPTION_KEY=\"H4rb0rEncryptK3y!!AviAdmin202626\" node test-supervisor.js)"
     ]
   }
 }

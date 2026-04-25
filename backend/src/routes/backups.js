@@ -1,92 +1,76 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { getInstance, haGet, haPost, getToken } from '../utils/haApi.js';
+import { getInstance, callCompanion, streamCompanion } from '../utils/haApi.js';
 import { logAudit } from '../utils/audit.js';
 
 const router = Router();
 router.use(requireAuth);
 
+function getInst(id) {
+  return getInstance(id);
+}
+
 router.get('/:id/backups', async (req, res) => {
-  const inst = getInstance(req.params.id);
+  const inst = getInst(req.params.id);
+  if (!inst.companion_enabled) return res.json([]);
   try {
-    const data = await haGet(inst, '/api/hassio/backups');
-    res.json(data?.data?.backups || []);
+    const data = await callCompanion(inst, '/backups');
+    res.json(data);
   } catch (e) {
-    // Supervisor API absent on non-OS/Supervised installs — not an error
-    if (e.status === 401 || e.status === 404) return res.json([]);
     res.status(e.status || 500).json({ error: e.message });
   }
 });
 
 router.post('/:id/backups', async (req, res) => {
-  const inst = getInstance(req.params.id);
+  const inst = getInst(req.params.id);
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
-    const result = await haPost(inst, '/api/hassio/backups/new/full', { name: `Harbor backup ${new Date().toISOString().slice(0, 10)}` });
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_triggered', details: 'Manual full backup triggered' });
-    res.json({ ok: true, slug: result?.data?.slug });
+    const data = await callCompanion(inst, '/backups/new', 'POST');
+    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_created', details: 'Full backup triggered via Companion' });
+    res.json(data);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-router.get('/:id/backups/schedule', async (req, res) => {
-  const inst = getInstance(req.params.id);
+router.get('/:id/backups/:slug/info', async (req, res) => {
+  const inst = getInst(req.params.id);
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
-    // Stored locally in Harbor settings as HA doesn't have native schedule API
-    const { getDb } = await import('../db/index.js');
-    const row = getDb().prepare("SELECT value FROM harbor_settings WHERE key = ?").get(`backup_schedule_${inst.id}`);
-    res.json(row ? JSON.parse(row.value) : { enabled: false, schedule: '0 3 * * *' });
+    const data = await callCompanion(inst, `/backups/${req.params.slug}/info`);
+    res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-router.post('/:id/backups/schedule', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  const { enabled, schedule } = req.body;
+router.post('/:id/backups/:slug/restore', async (req, res) => {
+  const inst = getInst(req.params.id);
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
-    const { getDb } = await import('../db/index.js');
-    const val = JSON.stringify({ enabled: !!enabled, schedule: schedule || '0 3 * * *' });
-    getDb().prepare("INSERT OR REPLACE INTO harbor_settings (key, value) VALUES (?, ?)").run(`backup_schedule_${inst.id}`, val);
-    res.json({ ok: true });
+    const data = await callCompanion(inst, `/backups/${req.params.slug}/restore`, 'POST');
+    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_restored', details: `Backup ${req.params.slug} restore triggered` });
+    res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-router.get('/:id/backups/:backup_slug/download', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  const token = getToken(inst);
-  const url = `${inst.url}/api/hassio/backups/${req.params.backup_slug}/download`;
-
+router.get('/:id/backups/:slug/download', async (req, res) => {
+  const inst = getInst(req.params.id);
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
-    const upstream = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!upstream.ok) return res.status(upstream.status).json({ error: `Upstream error ${upstream.status}` });
-
-    res.setHeader('Content-Type', 'application/x-tar');
-    res.setHeader('Content-Disposition', `attachment; filename="${req.params.backup_slug}.tar"`);
-    if (upstream.headers.get('content-length')) {
-      res.setHeader('Content-Length', upstream.headers.get('content-length'));
-    }
-
-    upstream.body.pipeTo(new WritableStream({
-      write(chunk) { res.write(chunk); },
-      close() { res.end(); },
-      abort(err) { res.destroy(err); },
-    }));
-
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_downloaded', details: `Backup ${req.params.backup_slug} downloaded` });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.post('/:id/backups/:backup_slug/restore', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  try {
-    await haPost(inst, `/api/hassio/backups/${req.params.backup_slug}/restore/full`);
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_restored', details: `Backup ${req.params.backup_slug} restore triggered` });
-    res.json({ ok: true });
+    const upstream = await streamCompanion(inst, `/backups/${req.params.slug}/download`);
+    res.setHeader('Content-Type', 'application/tar+gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.slug}.tar.gz"`);
+    const reader = upstream.body.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) { res.end(); return; }
+      res.write(Buffer.from(value));
+      await pump();
+    };
+    await pump();
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }

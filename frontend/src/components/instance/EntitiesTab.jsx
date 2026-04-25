@@ -4,19 +4,19 @@ import { useWs } from '../../context/WsContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Spinner from '../ui/Spinner.jsx';
 import EmptyState from '../ui/EmptyState.jsx';
-import { Lightbulb, ToggleRight, Activity, Zap, Thermometer, Wind, Tv, ChevronUp, Box, Layers } from 'lucide-react';
+import { Lightbulb, ToggleRight, Activity, Zap, Thermometer, Wind, Tv, ChevronUp, Box, Layers, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 
 const DOMAIN_META = {
-  light:         { label: 'Lights',          icon: Lightbulb,    toggleable: true },
-  switch:        { label: 'Switches',         icon: ToggleRight,  toggleable: true },
-  input_boolean: { label: 'Helpers',          icon: ToggleRight,  toggleable: true },
-  sensor:        { label: 'Sensors',          icon: Activity,     toggleable: false },
-  binary_sensor: { label: 'Binary Sensors',   icon: Zap,          toggleable: false },
-  climate:       { label: 'Climate',          icon: Thermometer,  toggleable: false },
-  cover:         { label: 'Covers',           icon: ChevronUp,    toggleable: true, onSvc: 'open_cover', offSvc: 'close_cover', onState: 'open' },
-  fan:           { label: 'Fans',             icon: Wind,         toggleable: true },
-  media_player:  { label: 'Media',            icon: Tv,           toggleable: false },
+  light:         { label: 'Lights',         icon: Lightbulb,   toggleable: true },
+  switch:        { label: 'Switches',        icon: ToggleRight, toggleable: true },
+  input_boolean: { label: 'Helpers',         icon: ToggleRight, toggleable: true },
+  sensor:        { label: 'Sensors',         icon: Activity,    toggleable: false },
+  binary_sensor: { label: 'Binary Sensors',  icon: Zap,         toggleable: false },
+  climate:       { label: 'Climate',         icon: Thermometer, toggleable: false },
+  cover:         { label: 'Covers',          icon: ChevronUp,   toggleable: true, onSvc: 'open_cover', offSvc: 'close_cover', onState: 'open' },
+  fan:           { label: 'Fans',            icon: Wind,        toggleable: true },
+  media_player:  { label: 'Media',           icon: Tv,          toggleable: false },
 };
 
 const DOMAIN_ORDER = ['light', 'switch', 'input_boolean', 'sensor', 'binary_sensor', 'climate', 'cover', 'fan', 'media_player'];
@@ -89,20 +89,49 @@ function EntityCard({ entity, offline, onToggle }) {
   );
 }
 
+function AreaSection({ areaName, entities, offline, onToggle, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="mb-5">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 w-full mb-2 text-left group"
+      >
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{areaName}</span>
+        <span className="badge badge-gray ml-1">{entities.length}</span>
+        <span className="ml-auto text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors">
+          {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </span>
+      </button>
+      {open && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+          {entities.map(entity => (
+            <EntityCard key={entity.entity_id} entity={entity} offline={offline} onToggle={onToggle} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EntitiesTab({ inst }) {
   const { subscribe } = useWs();
   const { toast } = useToast();
   const [entities, setEntities] = useState([]);
+  const [areaData, setAreaData] = useState(null); // { areas: {id: name}, entity_areas: {entity_id: area_id} }
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState('all');
   const offline = inst.status !== 'connected';
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/instances/${inst.id}/entities`)
-      .then(setEntities)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.allSettled([
+      api.get(`/instances/${inst.id}/entities`),
+      api.get(`/instances/${inst.id}/entities/areas`),
+    ]).then(([entitiesRes, areasRes]) => {
+      if (entitiesRes.status === 'fulfilled') setEntities(entitiesRes.value);
+      if (areasRes.status === 'fulfilled') setAreaData(areasRes.value);
+    }).finally(() => setLoading(false));
   }, [inst.id]);
 
   // Live updates
@@ -128,7 +157,6 @@ export default function EntitiesTab({ inst }) {
       service = turnOn ? 'turn_on' : 'turn_off';
     }
 
-    // Optimistic update
     const expectedState = meta.onState ?? (turnOn ? 'on' : 'off');
     setEntities(prev => prev.map(e => e.entity_id === entity.entity_id ? { ...e, state: expectedState } : e));
 
@@ -136,12 +164,10 @@ export default function EntitiesTab({ inst }) {
       await api.post(`/instances/${inst.id}/entities/call`, { entity_id: entity.entity_id, service });
     } catch (err) {
       toast(err.message, 'error');
-      // Revert
       setEntities(prev => prev.map(e => e.entity_id === entity.entity_id ? { ...e, state: entity.state } : e));
     }
   }, [inst.id, toast]);
 
-  // Compute available domains in the current entity list
   const availableDomains = [...new Set(entities.map(e => e.entity_id.split('.')[0]))]
     .sort((a, b) => {
       const ai = DOMAIN_ORDER.indexOf(a), bi = DOMAIN_ORDER.indexOf(b);
@@ -149,6 +175,29 @@ export default function EntitiesTab({ inst }) {
     });
 
   const filtered = domainFilter === 'all' ? entities : entities.filter(e => e.entity_id.startsWith(`${domainFilter}.`));
+
+  // Group by area
+  const groups = (() => {
+    if (!areaData) return [{ name: null, entities: filtered }];
+
+    const { areas, entity_areas } = areaData;
+    const byArea = {};
+    const unassigned = [];
+
+    for (const entity of filtered) {
+      const areaId = entity_areas[entity.entity_id];
+      if (areaId && areas[areaId]) {
+        if (!byArea[areaId]) byArea[areaId] = { name: areas[areaId], entities: [] };
+        byArea[areaId].entities.push(entity);
+      } else {
+        unassigned.push(entity);
+      }
+    }
+
+    const result = Object.values(byArea).sort((a, b) => a.name.localeCompare(b.name));
+    if (unassigned.length) result.push({ name: 'Unassigned', entities: unassigned });
+    return result;
+  })();
 
   if (loading) return <div className="flex items-center justify-center h-48"><Spinner size="lg" /></div>;
 
@@ -181,7 +230,20 @@ export default function EntitiesTab({ inst }) {
 
       {filtered.length === 0 ? (
         <EmptyState icon={Box} title="No entities" description="No entities found in this domain." />
+      ) : areaData ? (
+        // Grouped by area
+        groups.map((group, i) => (
+          <AreaSection
+            key={group.name || 'ungrouped'}
+            areaName={group.name || 'Entities'}
+            entities={group.entities}
+            offline={offline}
+            onToggle={handleToggle}
+            defaultOpen={i < 5}
+          />
+        ))
       ) : (
+        // No area data — flat grid
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
           {filtered.map(entity => (
             <EntityCard key={entity.entity_id} entity={entity} offline={offline} onToggle={handleToggle} />

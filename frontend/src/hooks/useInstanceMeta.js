@@ -1,47 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { api } from '../api/client.js';
 
-// Fetches update + backup summary for a single instance card.
-// Only fires when status is 'connected'.
-export function useInstanceMeta(instanceId, status) {
-  const [updates, setUpdates] = useState(null);
-  const [latestBackup, setLatestBackup] = useState(undefined); // undefined = not loaded
-  const [loading, setLoading] = useState(false);
+// Stub — backup and update badges removed (Supervisor API not accessible externally).
+// Kept for import compatibility; returns empty values so callers don't need updating.
+export function useInstanceMeta(_instanceId, _status) {
+  return { updates: null, backupStatus: null, backupDate: null, backupAgeWarning: false, loading: false };
+}
 
-  useEffect(() => {
-    if (status !== 'connected') return;
-    setLoading(true);
+export function usePeoplePresence(instanceId, status, enabled) {
+  const [people, setPeople] = useState(null);
 
-    Promise.allSettled([
-      api.get(`/instances/${instanceId}/updates`),
-      api.get(`/instances/${instanceId}/backups`),
-    ]).then(([updatesRes, backupsRes]) => {
-      if (updatesRes.status === 'fulfilled') {
-        const u = updatesRes.value;
-        const count =
-          (u.core?.update_available ? 1 : 0) +
-          (u.supervisor?.update_available ? 1 : 0) +
-          (u.os?.update_available ? 1 : 0) +
-          (u.addons?.length || 0);
-        setUpdates(count);
-      }
-      if (backupsRes.status === 'fulfilled') {
-        const backups = backupsRes.value;
-        if (!backups.length) { setLatestBackup(null); return; }
-        const sorted = [...backups].sort((a, b) => new Date(b.date) - new Date(a.date));
-        setLatestBackup(sorted[0]);
-      } else {
-        setLatestBackup(null);
-      }
-    }).finally(() => setLoading(false));
-  }, [instanceId, status]);
+  const load = useCallback(() => {
+    if (!enabled || status !== 'connected' || people !== null) return;
+    api.get(`/instances/${instanceId}/entities?domain=person`)
+      .then(entities => {
+        setPeople(entities.map(e => ({
+          entity_id: e.entity_id,
+          name: e.attributes?.friendly_name || e.entity_id.split('.')[1]?.replace(/_/g, ' ') || e.entity_id,
+          state: e.state,
+        })));
+      })
+      .catch(() => setPeople([]));
+  }, [instanceId, status, enabled, people]);
 
-  const backupAgeWarning = (() => {
-    if (latestBackup === undefined) return false;
-    if (latestBackup === null) return true;
-    const age = (Date.now() - new Date(latestBackup.date)) / (1000 * 60 * 60 * 24);
-    return age > 7;
-  })();
-
-  return { updates, backupAgeWarning, loading };
+  return { people, load };
 }

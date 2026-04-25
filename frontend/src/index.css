@@ -58,3 +58,20 @@
   .badge-gray   { @apply bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400; }
   .badge-yellow { @apply bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400; }
 }
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(1.35); }
+}
+.status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes people-in {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: 200px; }
+}
+.people-panel {
+  animation: people-in 0.2s ease-out forwards;
+  overflow: hidden;
+}

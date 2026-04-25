@@ -26,6 +26,7 @@ import searchRoutes from './routes/search.js';
 import auditRoutes from './routes/audit.js';
 import settingsRoutes from './routes/settings.js';
 import harborRoutes, { scheduleUpdateCheck } from './routes/harbor.js';
+import companionRoutes from './routes/companion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -53,6 +54,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/harbor', harborRoutes);
+app.use('/api/instances', companionRoutes);
 
 // Serve React build in production
 const publicDir = path.join(__dirname, '..', 'public');

@@ -6,6 +6,38 @@ import { EventEmitter } from 'events';
 const BACKOFF_BASE = 2000;
 const BACKOFF_MAX = 60000;
 
+// Infer installation type from /api/config without Supervisor API access.
+// 'hassio' in components = Supervisor present; 'homeassistant_hardware' = HAOS specifically.
+function inferInstallationType(config) {
+  if (config.installation_type && config.installation_type !== 'unknown') {
+    return config.installation_type;
+  }
+  const components = config.components || [];
+  if (components.includes('hassio')) {
+    return components.includes('homeassistant_hardware')
+      ? 'Home Assistant OS'
+      : 'Home Assistant Supervised';
+  }
+  return config.installation_type || null;
+}
+
+async function fetchInstallationMeta(url, token, currentType) {
+  try {
+    const configRes = await fetch(`${url}/api/config`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!configRes.ok) return { installationType: currentType, haVersion: null };
+    const config = await configRes.json();
+    return {
+      installationType: inferInstallationType(config) || currentType,
+      haVersion: config.version || null,
+    };
+  } catch {
+    return { installationType: currentType, haVersion: null };
+  }
+}
+
 export class WebSocketManager extends EventEmitter {
   constructor() {
     super();
@@ -38,7 +70,7 @@ export class WebSocketManager extends EventEmitter {
   _attempt(inst, state) {
     let token;
     try {
-      token = decrypt(inst.token_encrypted);
+      token = decrypt(inst.token_encrypted).trim();
     } catch {
       this._setStatus(inst, state, 'auth_failed');
       return;
@@ -54,7 +86,6 @@ export class WebSocketManager extends EventEmitter {
     }
 
     state.ws = ws;
-    let authenticated = false;
 
     ws.on('message', (raw) => {
       let msg;
@@ -63,11 +94,11 @@ export class WebSocketManager extends EventEmitter {
       if (msg.type === 'auth_required') {
         ws.send(JSON.stringify({ type: 'auth', access_token: token }));
       } else if (msg.type === 'auth_ok') {
-        authenticated = true;
         state.backoffMs = BACKOFF_BASE;
         this._setStatus(inst, state, 'connected');
         this._subscribeStateChanges(inst, ws);
         this._syncAllStates(inst, ws);
+        this._refreshInstanceMeta(inst, token);
       } else if (msg.type === 'auth_invalid') {
         this._setStatus(inst, state, 'auth_failed');
         ws.terminate();
@@ -84,6 +115,36 @@ export class WebSocketManager extends EventEmitter {
     });
 
     ws.on('error', () => {});
+  }
+
+  // Re-detect installation_type and ha_version on every successful connection
+  async _refreshInstanceMeta(inst, token) {
+    try {
+      const { installationType, haVersion } = await fetchInstallationMeta(
+        inst.url, token, inst.installation_type
+      );
+
+      const db = getDb();
+      const updates = [];
+      const params = [];
+
+      if (installationType && installationType !== inst.installation_type) {
+        updates.push('installation_type = ?');
+        params.push(installationType);
+      }
+      if (haVersion && haVersion !== inst.ha_version) {
+        updates.push('ha_version = ?');
+        params.push(haVersion);
+      }
+
+      if (updates.length) {
+        params.push(inst.id);
+        db.prepare(`UPDATE instances SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+        // Patch local inst so reconnect logic uses the updated type
+        inst.installation_type = installationType || inst.installation_type;
+        inst.ha_version = haVersion || inst.ha_version;
+      }
+    } catch {}
   }
 
   _subscribeStateChanges(inst, ws) {

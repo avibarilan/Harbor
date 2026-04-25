@@ -73,5 +73,11 @@ export function initDb() {
     );
   `);
 
+  // Migrations for columns added after initial release
+  try { db.exec("ALTER TABLE instances ADD COLUMN cloudflare_proxied INTEGER DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_url TEXT"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_secret TEXT"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_enabled INTEGER DEFAULT 0"); } catch {}
+
   return db;
 }

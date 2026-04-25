@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getInstance, haPost } from '../utils/haApi.js';
+import { getInstance, haPost, callHaWs } from '../utils/haApi.js';
 import { logAudit } from '../utils/audit.js';
 
 const router = Router();
@@ -26,6 +26,33 @@ router.get('/:id/entities', (req, res) => {
   }));
 
   res.json(entities);
+});
+
+router.get('/:id/entities/areas', async (req, res) => {
+  const inst = getInstance(req.params.id);
+  try {
+    const [areasResult, entitiesResult] = await Promise.allSettled([
+      callHaWs(inst, { type: 'config/area_registry/list' }),
+      callHaWs(inst, { type: 'config/entity_registry/list' }),
+    ]);
+
+    const areas = areasResult.status === 'fulfilled' ? (areasResult.value || []) : [];
+    const entityEntries = entitiesResult.status === 'fulfilled' ? (entitiesResult.value || []) : [];
+
+    const areaMap = {};
+    for (const area of areas) {
+      if (area.area_id) areaMap[area.area_id] = area.name;
+    }
+
+    const entityAreas = {};
+    for (const entity of entityEntries) {
+      if (entity.area_id) entityAreas[entity.entity_id] = entity.area_id;
+    }
+
+    res.json({ areas: areaMap, entity_areas: entityAreas });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 router.post('/:id/entities/call', async (req, res) => {

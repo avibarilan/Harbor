@@ -84,9 +84,6 @@ export default function InstanceDetailPage() {
             {inst.ha_version && (
               <span className="text-xs font-mono text-gray-400 dark:text-gray-500 shrink-0">{inst.ha_version}</span>
             )}
-            {inst.installation_type && (
-              <span className="badge badge-gray shrink-0 hidden sm:flex">{inst.installation_type}</span>
-            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
