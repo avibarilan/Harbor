@@ -34,10 +34,9 @@ app = FastAPI(title="Harbor Companion", version=VERSION)
 async def startup():
     global _secret
     _secret = load_or_create_secret()
-    token_preview = sup.SUPERVISOR_TOKEN[:10] + "..." if sup.SUPERVISOR_TOKEN else "(empty)"
     log.info("=" * 60)
     log.info("Harbor Companion started")
-    log.info(f"SUPERVISOR_TOKEN (first 10 chars): {token_preview!r}")
+    log.info(f"SUPERVISOR_TOKEN length: {len(sup.SUPERVISOR_TOKEN)} chars")
     log.info(f"X-Harbor-Secret: {_secret}")
     log.info("Copy this secret into Harbor → Instance Settings → Companion")
     log.info("=" * 60)

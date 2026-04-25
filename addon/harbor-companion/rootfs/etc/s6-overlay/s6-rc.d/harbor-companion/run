@@ -1,2 +1,2 @@
-#!/command/execlineb -P
+#!/command/with-contenv bashio
 python3 /app/main.py
