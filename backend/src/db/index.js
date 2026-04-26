@@ -82,6 +82,8 @@ export function initDb() {
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_ingress_token TEXT"); } catch {}
   // Reset any previously-enabled companions so users re-enable via the new Ingress flow
   try { db.exec("UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL WHERE companion_enabled = 1"); } catch {}
+  // v1.3 → v1.4: companion now phones home; store the one-time registration secret
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_registration_secret TEXT"); } catch {}
 
   return db;
 }

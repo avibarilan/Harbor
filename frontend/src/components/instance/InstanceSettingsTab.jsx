@@ -5,7 +5,7 @@ import { useSites } from '../../context/SitesContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
-import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Link } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Link, Copy } from 'lucide-react';
 
 export default function InstanceSettingsTab({ inst, onSaved }) {
   const navigate = useNavigate();
@@ -28,9 +28,13 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
   const [companionEnabling, setCompanionEnabling] = useState(false);
   const [companionError, setCompanionError] = useState('');
   const [removeCompanionConfirm, setRemoveCompanionConfirm] = useState(false);
+  const [setupInfo, setSetupInfo] = useState(null);   // { instance_id, registration_secret }
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [checkStatusMsg, setCheckStatusMsg] = useState('');
 
   const companionEnabled = !!inst.companion_enabled;
   const isAuthFailed = inst.status === 'auth_failed';
+  const harborOrigin = window.location.origin;
 
   const handleTest = async () => {
     setTesting(true);
@@ -78,15 +82,38 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
     setCompanionEnabling(true);
     setCompanionError('');
     try {
-      await api.post(`/instances/${inst.id}/companion/enable`, {});
-      await refresh();
-      await onSaved();
-      toast('Companion connected via Home Assistant Ingress', 'success');
+      const result = await api.post(`/instances/${inst.id}/companion/enable`, {});
+      setSetupInfo(result);
+      setCheckStatusMsg('');
     } catch (err) {
       setCompanionError(err.message);
     } finally {
       setCompanionEnabling(false);
     }
+  };
+
+  const handleCheckStatus = async () => {
+    setCheckingStatus(true);
+    setCheckStatusMsg('');
+    try {
+      const res = await api.get(`/instances/${inst.id}/companion`);
+      if (res.enabled) {
+        setSetupInfo(null);
+        await refresh();
+        await onSaved();
+        toast('Companion connected!', 'success');
+      } else {
+        setCheckStatusMsg('Not registered yet — make sure the add-on is started.');
+      }
+    } catch (err) {
+      setCheckStatusMsg(err.message);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const copyToClipboard = (value) => {
+    navigator.clipboard.writeText(value).then(() => toast('Copied!', 'success'));
   };
 
   const handleRemoveCompanion = async () => {
@@ -194,6 +221,60 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
             >
               <Unplug size={12} /> Disable
             </button>
+          </div>
+        ) : setupInfo ? (
+          <div className="card p-4 space-y-4">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Configure the Harbor Companion add-on in Home Assistant with these values:
+            </p>
+            <div className="space-y-3">
+              {[
+                { label: 'Harbor URL', value: harborOrigin },
+                { label: 'Instance ID', value: String(inst.id) },
+                { label: 'Registration Secret', value: setupInfo.registration_secret },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{label}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1.5 rounded border border-gray-200 dark:border-gray-700 truncate select-all">
+                      {value}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(value)}
+                      className="btn-sm btn-secondary flex items-center gap-1"
+                    >
+                      <Copy size={11} /> Copy
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <ol className="text-xs text-gray-500 dark:text-gray-400 space-y-1 list-decimal list-inside">
+              <li>Install the Harbor Companion add-on from your Home Assistant add-on store</li>
+              <li>Open the add-on <strong>Configuration</strong> tab and enter the three values above</li>
+              <li>Start the add-on — it will register with Harbor automatically</li>
+            </ol>
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleCheckStatus}
+                disabled={checkingStatus}
+                className="btn-sm btn-primary flex items-center gap-2"
+              >
+                {checkingStatus && <Spinner size="sm" />} Check status
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSetupInfo(null); setCheckStatusMsg(''); }}
+                className="btn-sm btn-ghost"
+              >
+                Cancel
+              </button>
+              {checkStatusMsg && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{checkStatusMsg}</p>
+              )}
+            </div>
           </div>
         ) : (
           <div className="card p-4 space-y-3">

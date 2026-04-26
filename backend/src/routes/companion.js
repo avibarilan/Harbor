@@ -1,72 +1,69 @@
 import { Router } from 'express';
+import { randomBytes } from 'crypto';
 import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logAudit } from '../utils/audit.js';
-import { getInstance, getToken, callCompanion } from '../utils/haApi.js';
+import { getInstance } from '../utils/haApi.js';
 
+// ── Unauthenticated: companion add-on phones home on startup ───────────────
+export const companionPublicRouter = Router();
+
+companionPublicRouter.post('/register', (req, res) => {
+  const { instance_id, ingress_token, secret } = req.body ?? {};
+  if (!instance_id || !ingress_token || !secret) {
+    return res.status(400).json({ error: 'instance_id, ingress_token, and secret are required' });
+  }
+
+  const db = getDb();
+  const inst = db.prepare('SELECT * FROM instances WHERE id = ?').get(instance_id);
+  if (!inst) return res.status(404).json({ error: 'Instance not found' });
+  if (!inst.companion_registration_secret || inst.companion_registration_secret !== secret) {
+    return res.status(401).json({ error: 'Invalid registration secret' });
+  }
+
+  db.prepare(
+    'UPDATE instances SET companion_enabled = 1, companion_ingress_token = ?, companion_registration_secret = NULL WHERE id = ?'
+  ).run(ingress_token, inst.id);
+
+  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_registered', details: 'Companion registered via phone-home' });
+  res.json({ ok: true });
+});
+
+// ── Authenticated instance routes ──────────────────────────────────────────
 const router = Router();
 router.use(requireAuth);
 
 router.get('/:id/companion', (req, res) => {
-  const inst = getDb().prepare('SELECT id, companion_enabled, companion_ingress_token FROM instances WHERE id = ?').get(req.params.id);
+  const inst = getDb().prepare(
+    'SELECT id, companion_enabled, companion_ingress_token, companion_registration_secret FROM instances WHERE id = ?'
+  ).get(req.params.id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
   res.json({
     enabled: !!inst.companion_enabled,
+    pending: !inst.companion_enabled && !!inst.companion_registration_secret,
     ingress_token: inst.companion_ingress_token || null,
   });
 });
 
-router.post('/:id/companion/enable', async (req, res) => {
+router.post('/:id/companion/enable', (req, res) => {
   const inst = getInstance(req.params.id);
-  const token = getToken(inst);
-  const base = inst.url.replace(/\/$/, '');
+  const secret = randomBytes(32).toString('hex');
 
-  // /api/hassio/ingress/panels is accessible with an external LLAT and lists
-  // all ingress-enabled add-ons with their tokens.
-  let ingressToken;
-  try {
-    const r = await fetch(`${base}/api/hassio/ingress/panels`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) {
-      const text = await r.text().catch(() => '');
-      throw new Error(`HA API error ${r.status}: ${text}`);
-    }
-    const data = await r.json();
-    // Response shape: { data: { panels: { <slug>: { ingress_token, ... }, ... } } }
-    const panels = data?.data?.panels ?? data?.panels ?? {};
-    const entry = panels['harbor_companion'];
-    if (!entry) {
-      return res.status(404).json({ error: 'Harbor Companion add-on not found. Please install it from the Home Assistant add-on store first.' });
-    }
-    ingressToken = entry.ingress_token;
-    if (!ingressToken) throw new Error('ingress_token missing from panels response for harbor_companion');
-  } catch (e) {
-    if (e.status === 404 || (e.message || '').includes('not found')) {
-      return res.status(404).json({ error: 'Harbor Companion add-on not found. Please install it from the Home Assistant add-on store first.' });
-    }
-    return res.status(400).json({ error: `Failed to discover companion: ${e.message}` });
-  }
+  getDb().prepare(
+    'UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_registration_secret = ? WHERE id = ?'
+  ).run(secret, inst.id);
 
-  // Health-check via Ingress before committing
-  try {
-    const testInst = { ...inst, companion_enabled: 1, companion_ingress_token: ingressToken };
-    const health = await callCompanion(testInst, '/health');
-    if (health.status !== 'ok') throw new Error('Companion returned non-ok status');
-  } catch (e) {
-    return res.status(400).json({ error: `Companion health check failed: ${e.message}` });
-  }
-
-  getDb().prepare('UPDATE instances SET companion_enabled = 1, companion_ingress_token = ? WHERE id = ?').run(ingressToken, inst.id);
-  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_enabled', details: 'Companion enabled via Home Assistant Ingress' });
-  res.json({ ok: true, enabled: true, ingress_token: ingressToken });
+  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_enable_initiated', details: 'Registration secret generated; awaiting companion phone-home' });
+  res.json({ ok: true, pending: true, instance_id: inst.id, registration_secret: secret });
 });
 
 router.delete('/:id/companion', (req, res) => {
   const inst = getDb().prepare('SELECT * FROM instances WHERE id = ?').get(req.params.id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
 
-  getDb().prepare('UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL WHERE id = ?').run(req.params.id);
+  getDb().prepare(
+    'UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_registration_secret = NULL WHERE id = ?'
+  ).run(req.params.id);
   logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_disabled', details: 'Companion disabled' });
   res.json({ ok: true });
 });
