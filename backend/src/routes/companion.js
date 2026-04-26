@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logAudit } from '../utils/audit.js';
-import { getInstance, callCompanion, callHaWs } from '../utils/haApi.js';
+import { getInstance, getToken, callCompanion } from '../utils/haApi.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -18,20 +18,34 @@ router.get('/:id/companion', (req, res) => {
 
 router.post('/:id/companion/enable', async (req, res) => {
   const inst = getInstance(req.params.id);
+  const token = getToken(inst);
+  const base = inst.url.replace(/\/$/, '');
 
-  // Discover ingress token via HA WebSocket API — accessible with external LLATs
-  // unlike /api/hassio/* REST endpoints which require the internal Supervisor token.
+  // /api/hassio/ingress/panels is accessible with an external LLAT and lists
+  // all ingress-enabled add-ons with their tokens.
   let ingressToken;
   try {
-    const result = await callHaWs(inst, { type: 'hassio/addon/info', addon: 'harbor_companion' });
-    ingressToken = result?.ingress_token;
-    if (!ingressToken) throw new Error('ingress_token not present in add-on info response');
-  } catch (e) {
-    const msg = e.message || '';
-    if (msg.includes('not found') || msg.includes('404') || msg.includes('Unknown slug')) {
+    const r = await fetch(`${base}/api/hassio/ingress/panels`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(`HA API error ${r.status}: ${text}`);
+    }
+    const data = await r.json();
+    // Response shape: { data: { panels: { <slug>: { ingress_token, ... }, ... } } }
+    const panels = data?.data?.panels ?? data?.panels ?? {};
+    const entry = panels['harbor_companion'];
+    if (!entry) {
       return res.status(404).json({ error: 'Harbor Companion add-on not found. Please install it from the Home Assistant add-on store first.' });
     }
-    return res.status(400).json({ error: `Failed to discover companion: ${msg}` });
+    ingressToken = entry.ingress_token;
+    if (!ingressToken) throw new Error('ingress_token missing from panels response for harbor_companion');
+  } catch (e) {
+    if (e.status === 404 || (e.message || '').includes('not found')) {
+      return res.status(404).json({ error: 'Harbor Companion add-on not found. Please install it from the Home Assistant add-on store first.' });
+    }
+    return res.status(400).json({ error: `Failed to discover companion: ${e.message}` });
   }
 
   // Health-check via Ingress before committing
