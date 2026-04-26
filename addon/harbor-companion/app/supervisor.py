@@ -50,6 +50,14 @@ async def get_info() -> dict:
     }
 
 
+async def get_ingress_token() -> str:
+    data = await _get("/addons/self/info")
+    token = data.get("data", {}).get("ingress_token", "")
+    if not token:
+        raise SupervisorError("ingress_token missing from /addons/self/info response")
+    return token
+
+
 async def get_ha_version() -> str:
     info = await _get("/core/info")
     return info.get("data", {}).get("version", "unknown")

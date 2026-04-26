@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 
 import httpx
 import uvicorn
@@ -14,14 +13,11 @@ log = logging.getLogger("harbor-companion")
 
 VERSION = "1.2.0"
 
-# HA injects INGRESS_TOKEN into the add-on environment when ingress is enabled.
-INGRESS_TOKEN = os.environ.get("INGRESS_TOKEN", "").strip()
-
 app = FastAPI(title="Harbor Companion", version=VERSION)
 
 
 async def _register_with_harbor():
-    """Read add-on options and POST our ingress token to Harbor."""
+    """Fetch our own ingress token from the Supervisor, then POST it to Harbor."""
     try:
         with open("/data/options.json") as f:
             opts = json.load(f)
@@ -37,8 +33,10 @@ async def _register_with_harbor():
         log.info("Harbor registration not configured in add-on options — skipping")
         return
 
-    if not INGRESS_TOKEN:
-        log.warning("INGRESS_TOKEN env var not set — cannot register with Harbor")
+    try:
+        ingress_token = await sup.get_ingress_token()
+    except Exception as e:
+        log.warning(f"Could not retrieve ingress token from Supervisor: {e}")
         return
 
     try:
@@ -47,7 +45,7 @@ async def _register_with_harbor():
                 f"{harbor_url}/api/companion/register",
                 json={
                     "instance_id": instance_id,
-                    "ingress_token": INGRESS_TOKEN,
+                    "ingress_token": ingress_token,
                     "secret": harbor_secret,
                 },
             )
@@ -64,7 +62,6 @@ async def startup():
     log.info("=" * 60)
     log.info("Harbor Companion started - accessible via Home Assistant Ingress")
     log.info(f"SUPERVISOR_TOKEN length: {len(sup.SUPERVISOR_TOKEN)} chars")
-    log.info(f"INGRESS_TOKEN present: {'yes' if INGRESS_TOKEN else 'no'}")
     log.info("=" * 60)
     asyncio.create_task(_register_with_harbor())
 
