@@ -5,7 +5,7 @@ import { useSites } from '../../context/SitesContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
-import { CheckCircle, AlertTriangle, Trash2, Plug, PlugZap, Unplug } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Link } from 'lucide-react';
 
 export default function InstanceSettingsTab({ inst, onSaved }) {
   const navigate = useNavigate();
@@ -25,9 +25,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Companion state
-  const [companionUrl, setCompanionUrl] = useState(inst.companion_url || '');
-  const [companionSecret, setCompanionSecret] = useState('');
-  const [companionSaving, setCompanionSaving] = useState(false);
+  const [companionEnabling, setCompanionEnabling] = useState(false);
   const [companionError, setCompanionError] = useState('');
   const [removeCompanionConfirm, setRemoveCompanionConfirm] = useState(false);
 
@@ -76,23 +74,18 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
     navigate(`/`, { replace: true });
   };
 
-  const handleSaveCompanion = async (e) => {
-    e.preventDefault();
-    setCompanionSaving(true);
+  const handleEnableCompanion = async () => {
+    setCompanionEnabling(true);
     setCompanionError('');
     try {
-      await api.post(`/instances/${inst.id}/companion`, {
-        companion_url: companionUrl.trim(),
-        companion_secret: companionSecret.trim(),
-      });
+      await api.post(`/instances/${inst.id}/companion/enable`, {});
       await refresh();
       await onSaved();
-      setCompanionSecret('');
-      toast('Companion configured successfully', 'success');
+      toast('Companion connected via Home Assistant Ingress', 'success');
     } catch (err) {
       setCompanionError(err.message);
     } finally {
-      setCompanionSaving(false);
+      setCompanionEnabling(false);
     }
   };
 
@@ -101,9 +94,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
       await api.delete(`/instances/${inst.id}/companion`);
       await refresh();
       await onSaved();
-      setCompanionUrl('');
-      setCompanionSecret('');
-      toast('Companion removed', 'success');
+      toast('Companion disabled', 'success');
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -181,84 +172,44 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Harbor Companion</h2>
           {companionEnabled && (
-            <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected</span>
+            <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected via Ingress</span>
           )}
         </div>
 
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Install the Harbor Companion add-on in Home Assistant to enable backup management, updates,
-          add-on control, logs, and host reboot/shutdown from Harbor. Find the secret in the add-on logs
-          after installing.
+          add-on control, logs, and host reboot/shutdown from Harbor. Harbor connects automatically
+          using Home Assistant's native Ingress system — no port forwarding or manual URL needed.
         </p>
 
         {companionEnabled ? (
-          <div className="card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">Companion URL</p>
-                <p className="text-sm font-mono text-gray-700 dark:text-gray-300">{inst.companion_url}</p>
-              </div>
-              <button
-                onClick={() => setRemoveCompanionConfirm(true)}
-                className="btn-sm btn-danger flex items-center gap-1.5"
-              >
-                <Unplug size={12} /> Remove
-              </button>
+          <div className="card p-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <Link size={14} />
+              <span>Connected via Home Assistant Ingress</span>
             </div>
-
-            {/* Allow re-saving to update secret */}
-            <form onSubmit={handleSaveCompanion} className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-3">
-              <p className="text-xs text-gray-400">Update companion URL or secret:</p>
-              <div>
-                <label className="label">Companion URL</label>
-                <input className="input" value={companionUrl} onChange={e => setCompanionUrl(e.target.value)} required />
-              </div>
-              <div>
-                <label className="label">New secret</label>
-                <input className="input font-mono text-xs" placeholder="Paste new secret…" value={companionSecret} onChange={e => setCompanionSecret(e.target.value)} required />
-              </div>
-              {companionError && <p className="text-sm text-red-600 dark:text-red-400">{companionError}</p>}
-              <div className="flex justify-end">
-                <button type="submit" disabled={companionSaving} className="btn-md btn-secondary flex items-center gap-2">
-                  {companionSaving && <Spinner size="sm" />} Update
-                </button>
-              </div>
-            </form>
+            <button
+              onClick={() => setRemoveCompanionConfirm(true)}
+              className="btn-sm btn-danger flex items-center gap-1.5"
+            >
+              <Unplug size={12} /> Disable
+            </button>
           </div>
         ) : (
-          <form onSubmit={handleSaveCompanion} className="card p-4 space-y-3">
-            <div>
-              <label className="label">Companion URL</label>
-              <input
-                className="input"
-                placeholder={`${inst.url}/harbor-companion`}
-                value={companionUrl}
-                onChange={e => setCompanionUrl(e.target.value)}
-                required
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                Direct IP: <code className="font-mono">http://&#123;ha-ip&#125;:7779</code>
-                {' · '}Cloudflare Tunnel: <code className="font-mono">&#123;ha-url&#125;/harbor-companion</code>
-              </p>
-            </div>
-            <div>
-              <label className="label">Secret</label>
-              <input
-                className="input font-mono text-xs"
-                placeholder="Paste secret from add-on logs…"
-                value={companionSecret}
-                onChange={e => setCompanionSecret(e.target.value)}
-                required
-              />
-            </div>
+          <div className="card p-4 space-y-3">
             {companionError && <p className="text-sm text-red-600 dark:text-red-400">{companionError}</p>}
             <div className="flex justify-end">
-              <button type="submit" disabled={companionSaving} className="btn-md btn-primary flex items-center gap-2">
-                {companionSaving && <Spinner size="sm" />}
-                <Plug size={14} /> Connect companion
+              <button
+                type="button"
+                onClick={handleEnableCompanion}
+                disabled={companionEnabling}
+                className="btn-md btn-primary flex items-center gap-2"
+              >
+                {companionEnabling && <Spinner size="sm" />}
+                <PlugZap size={14} /> Enable Companion
               </button>
             </div>
-          </form>
+          </div>
         )}
       </div>
 
@@ -289,13 +240,13 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
 
       <ConfirmDialog
         open={removeCompanionConfirm}
-        title="Remove companion"
-        confirmLabel="Remove"
+        title="Disable companion"
+        confirmLabel="Disable"
         danger
         onClose={() => setRemoveCompanionConfirm(false)}
         onConfirm={handleRemoveCompanion}
       >
-        Remove the Harbor Companion configuration for <strong>{inst.name}</strong>? Supervisor features will revert to the "Open in HA" placeholder. The add-on itself is not uninstalled.
+        Disable the Harbor Companion for <strong>{inst.name}</strong>? Supervisor features will revert to the "Open in HA" placeholder. The add-on itself is not uninstalled.
       </ConfirmDialog>
     </div>
   );

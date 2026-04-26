@@ -6,6 +6,10 @@ function baseUrl(inst) {
   return inst.url.replace(/\/$/, '');
 }
 
+function ingressBase(inst) {
+  return `${baseUrl(inst)}/api/hassio_ingress/${inst.companion_ingress_token}`;
+}
+
 export function getInstance(id) {
   const inst = getDb().prepare('SELECT * FROM instances WHERE id = ?').get(id);
   if (!inst) throw Object.assign(new Error('Instance not found'), { status: 404 });
@@ -64,20 +68,15 @@ export async function haStream(inst, path, res) {
   return upstream;
 }
 
-// One-shot WebSocket call for commands not available via REST (e.g. user management)
 export async function callCompanion(inst, path, method = 'GET', body = undefined) {
-  if (!inst.companion_enabled || !inst.companion_url) {
+  if (!inst.companion_enabled || !inst.companion_ingress_token) {
     throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
   }
-  // Support passing plaintext secret directly (used during test before save)
-  const secret = inst._companion_secret_plain
-    ? inst._companion_secret_plain
-    : decrypt(inst.companion_secret).trim();
-
-  const url = inst.companion_url.replace(/\/$/, '') + path;
+  const token = getToken(inst);
+  const url = ingressBase(inst) + path;
   const opts = {
     method,
-    headers: { 'X-Harbor-Secret': secret, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
@@ -90,12 +89,12 @@ export async function callCompanion(inst, path, method = 'GET', body = undefined
 }
 
 export async function streamCompanion(inst, path) {
-  if (!inst.companion_enabled || !inst.companion_url) {
+  if (!inst.companion_enabled || !inst.companion_ingress_token) {
     throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
   }
-  const secret = decrypt(inst.companion_secret).trim();
-  const url = inst.companion_url.replace(/\/$/, '') + path;
-  const res = await fetch(url, { headers: { 'X-Harbor-Secret': secret } });
+  const token = getToken(inst);
+  const url = ingressBase(inst) + path;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     throw Object.assign(new Error(`Companion stream error ${res.status}`), { status: res.status });
   }

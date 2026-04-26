@@ -1,65 +1,24 @@
-import os
-import secrets
 import logging
-from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 import supervisor as sup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.0.0"
-SECRET_FILE = Path("/data/harbor_secret.txt")
-
-_secret: str = ""
-
-
-def load_or_create_secret() -> str:
-    if SECRET_FILE.exists():
-        s = SECRET_FILE.read_text().strip()
-        if s:
-            return s
-    s = secrets.token_hex(32)
-    SECRET_FILE.write_text(s)
-    return s
-
+VERSION = "1.1.0"
 
 app = FastAPI(title="Harbor Companion", version=VERSION)
 
 
 @app.on_event("startup")
 async def startup():
-    global _secret
-    _secret = load_or_create_secret()
     log.info("=" * 60)
-    log.info("Harbor Companion started")
+    log.info("Harbor Companion started - accessible via Home Assistant Ingress")
     log.info(f"SUPERVISOR_TOKEN length: {len(sup.SUPERVISOR_TOKEN)} chars")
-    log.info(f"X-Harbor-Secret: {_secret}")
-    log.info("Copy this secret into Harbor → Instance Settings → Companion")
     log.info("=" * 60)
-
-
-@app.middleware("http")
-async def strip_prefix(request: Request, call_next):
-    if request.url.path.startswith("/harbor-companion"):
-        scope = request.scope
-        scope["path"] = scope["path"][len("/harbor-companion"):]
-        if not scope["path"]:
-            scope["path"] = "/"
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    if request.url.path == "/health":
-        return await call_next(request)
-    provided = request.headers.get("X-Harbor-Secret", "")
-    if not secrets.compare_digest(provided, _secret):
-        return Response(content='{"detail":"Unauthorized"}', status_code=401, media_type="application/json")
-    return await call_next(request)
 
 
 def _sup_error(e: sup.SupervisorError):

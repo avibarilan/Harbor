@@ -37,7 +37,7 @@ function inferInstallationType(config) {
   return config.installation_type || 'unknown';
 }
 
-const INST_COLS = 'id, site_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_url, companion_enabled, created_at';
+const INST_COLS = 'id, site_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_enabled, companion_ingress_token, created_at';
 
 router.post('/', async (req, res) => {
   const { site_id, name, url } = req.body;

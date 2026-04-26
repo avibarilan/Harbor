@@ -1,5 +1,5 @@
 name: Harbor Companion
-version: "1.0.0"
+version: "1.1.0"
 slug: harbor_companion
 description: Bridge between Harbor Fleet Manager and Home Assistant Supervisor API
 url: https://github.com/avibarilan/Harbor
@@ -9,10 +9,9 @@ arch:
   - armhf
   - armv7
 init: false
-ports:
-  7779/tcp: 7779
-ports_description:
-  7779/tcp: Harbor Companion API
+ingress: true
+ingress_port: 7779
+ingress_entry: /
 map:
   - data:rw
 hassio_api: true

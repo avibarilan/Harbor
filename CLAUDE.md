@@ -37,9 +37,9 @@ On first run with no users in the DB, the default admin account `admin / changem
 
 **Database** (`backend/src/db/index.js`): single `better-sqlite3` instance, WAL mode, foreign keys on. Always get it via `getDb()` — never import the `db` variable directly. Schema is created inline in `initDb()`. Post-v1 column additions are done via `ALTER TABLE` with a `try/catch` immediately after schema creation (SQLite has no `IF NOT EXISTS` for `ADD COLUMN`).
 
-**instances table columns**: `id, site_id, name, url, token_encrypted, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_url, companion_secret, companion_enabled, created_at`. The `cloudflare_proxied` column (INTEGER 0/1) was added in v1.1 via migration. The `companion_url`, `companion_secret` (encrypted), and `companion_enabled` (INTEGER 0/1) columns were added in v1.2 via migration.
+**instances table columns**: `id, site_id, name, url, token_encrypted, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_enabled, companion_ingress_token, created_at`. The `cloudflare_proxied` column (INTEGER 0/1) was added in v1.1 via migration. The `companion_enabled` (INTEGER 0/1) and `companion_ingress_token` (TEXT, the HA Ingress token for the companion add-on) columns were added in v1.3 via migration. The previously-used `companion_url` and `companion_secret` columns were dropped in v1.3 when the companion switched to HA Ingress.
 
-**HA API proxy** (`backend/src/utils/haApi.js`): all routes that talk to Home Assistant use `haGet`, `haPost`, `haDelete` from this module. They decrypt the LLAT, attach it as `Authorization: Bearer`, and throw errors with `.status` set so route handlers can forward the status code. `baseUrl(inst)` (private helper) trims trailing slashes before building URLs — all URL construction goes through it. For commands only available via HA's WebSocket API (user management, entity/area registry), use `callHaWs` — it opens a one-shot authenticated WS connection, sends the command, and resolves/rejects the promise. For Supervisor-level operations when the companion is configured, use `callCompanion(inst, path, method, body)` or `streamCompanion(inst, path)` — these decrypt `companion_secret`, attach `X-Harbor-Secret`, and forward to the companion URL.
+**HA API proxy** (`backend/src/utils/haApi.js`): all routes that talk to Home Assistant use `haGet`, `haPost`, `haDelete` from this module. They decrypt the LLAT, attach it as `Authorization: Bearer`, and throw errors with `.status` set so route handlers can forward the status code. `baseUrl(inst)` (private helper) trims trailing slashes before building URLs — all URL construction goes through it. For commands only available via HA's WebSocket API (user management, entity/area registry), use `callHaWs` — it opens a one-shot authenticated WS connection, sends the command, and resolves/rejects the promise. For Supervisor-level operations when the companion is configured, use `callCompanion(inst, path, method, body)` or `streamCompanion(inst, path)` — these construct the URL as `{instance_url}/api/hassio_ingress/{companion_ingress_token}{path}` and authenticate with the same LLAT (`Authorization: Bearer`) used for all other HA API calls. No shared secret is involved.
 
 **Token encryption** (`backend/src/utils/encryption.js`): LLAT tokens are encrypted with AES-256-CBC before being written to SQLite. The IV is prepended to the ciphertext as `iv_hex:enc_hex`. Never store or log a raw token.
 
@@ -57,18 +57,23 @@ On first run with no users in the DB, the default admin account `admin / changem
 
 ### Harbor Companion add-on
 
-The `/addon/harbor-companion` directory contains a Home Assistant add-on that bridges Harbor and the Supervisor API. It runs inside HA on port 7779 and exposes an HTTP API protected by a shared secret (`X-Harbor-Secret` header). The secret is generated on first run and stored in `/data/harbor_secret.txt`.
+The `/addon/harbor-companion` directory contains a Home Assistant add-on that bridges Harbor and the Supervisor API. It runs inside HA on port 7779 and is accessed exclusively through Home Assistant's native **Ingress** system — the port is never exposed externally and no shared secret is needed.
 
 **Add-on structure**:
-- `config.yaml` — HA add-on manifest (slug: `harbor_companion`, port 7779)
+- `config.yaml` — HA add-on manifest (slug: `harbor_companion`, `ingress: true`, `ingress_port: 7779`)
 - `Dockerfile` — Alpine + Python + FastAPI, built by HA's add-on system
-- `app/main.py` — FastAPI app; validates `X-Harbor-Secret` via middleware on all routes except `/health`
+- `app/main.py` — FastAPI app; no auth middleware — security is handled entirely by HA Ingress
 - `app/supervisor.py` — async Supervisor API client using `SUPERVISOR_TOKEN` (injected by HA)
 - `rootfs/etc/services.d/harbor-companion/run` — s6 service runner
 
-**Backend companion proxy** (`backend/src/utils/haApi.js`): `callCompanion(inst, path, method, body)` decrypts `companion_secret` and makes requests to `{companion_url}{path}`. `streamCompanion(inst, path)` returns the raw fetch response for binary streaming (backup downloads). Both throw errors with `.status` for route handlers.
+**Ingress-based companion URL**: `{instance_url}/api/hassio_ingress/{companion_ingress_token}{path}`. The `companion_ingress_token` is discovered on first enable by calling `GET {instance_url}/api/hassio/addons/harbor_companion/info` with the instance LLAT and reading `data.ingress_token` from the response.
 
-**Companion routes** (`backend/src/routes/companion.js`): `GET/POST/DELETE /api/instances/:id/companion` manages the companion configuration. `POST` tests connectivity before saving (calls `/health` on the companion). Secret is stored encrypted in the DB just like LLAT tokens.
+**Backend companion proxy** (`backend/src/utils/haApi.js`): `callCompanion(inst, path, method, body)` builds the Ingress URL and attaches `Authorization: Bearer {llat}`. `streamCompanion(inst, path)` returns the raw fetch response for binary streaming (backup downloads). Both throw errors with `.status` for route handlers.
+
+**Companion routes** (`backend/src/routes/companion.js`):
+- `GET /:id/companion` — returns `{ enabled, ingress_token }`
+- `POST /:id/companion/enable` — auto-discovers the Ingress token from HA, health-checks via Ingress, stores `companion_ingress_token` and sets `companion_enabled = 1`
+- `DELETE /:id/companion` — sets `companion_enabled = 0` and clears `companion_ingress_token`
 
 **Tab unlocking**: When `companion_enabled = 1` on an instance, the backups, addons, updates, and system routes proxy to the companion instead of returning the "not available" response. The frontend tab components check `inst.companion_enabled` and render either the full management UI or the "Open in HA" placeholder accordingly.
 

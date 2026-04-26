@@ -75,9 +75,13 @@ export function initDb() {
 
   // Migrations for columns added after initial release
   try { db.exec("ALTER TABLE instances ADD COLUMN cloudflare_proxied INTEGER DEFAULT 0"); } catch {}
-  try { db.exec("ALTER TABLE instances ADD COLUMN companion_url TEXT"); } catch {}
-  try { db.exec("ALTER TABLE instances ADD COLUMN companion_secret TEXT"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_enabled INTEGER DEFAULT 0"); } catch {}
+  // v1.2 → v1.3: migrate from secret-based companion to Ingress-based companion
+  try { db.exec("ALTER TABLE instances DROP COLUMN companion_url"); } catch {}
+  try { db.exec("ALTER TABLE instances DROP COLUMN companion_secret"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_ingress_token TEXT"); } catch {}
+  // Reset any previously-enabled companions so users re-enable via the new Ingress flow
+  try { db.exec("UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL WHERE companion_enabled = 1"); } catch {}
 
   return db;
 }
