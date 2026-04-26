@@ -170,3 +170,19 @@ volumes:
   - /var/run/docker.sock:/var/run/docker.sock
 ```
 Without this mount, the update button is hidden and a note is shown explaining manual update is required.
+
+## Docker Hub Deployment
+
+- **Image**: `avibarilan/harbor`
+- Published automatically on every push to `main` via `.github/workflows/docker-publish.yml`
+- Tags pushed: `latest` and the full Git SHA (e.g. `avibarilan/harbor:abc1234...`)
+- Synology NAS pulls the pre-built image — no file copying or local build needed
+
+**To update on Synology via SSH:**
+```bash
+docker-compose pull && docker-compose up -d
+```
+
+**Required GitHub secrets** (Settings → Secrets → Actions):
+- `DOCKERHUB_USERNAME` — Docker Hub username
+- `DOCKERHUB_TOKEN` — Docker Hub access token (not your password)

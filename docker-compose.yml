@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   harbor:
-    build: .
+    image: avibarilan/harbor:latest
     container_name: harbor
     restart: unless-stopped
     ports:

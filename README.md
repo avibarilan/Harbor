@@ -37,11 +37,27 @@ Frontend dev server runs on `http://localhost:5173` and proxies `/api` and `/ws`
 
 ## Synology Container Manager Deployment
 
-1. In Container Manager → Project → Create
-2. Use "Upload docker-compose.yml" and paste the contents of `docker-compose.yml`
-3. Add environment variables via the UI (JWT_SECRET, ENCRYPTION_KEY)
-4. Create a bind mount from a Synology folder to `/data`
-5. Start the project
+Harbor publishes a pre-built Docker image to Docker Hub on every push to `main` — no file copying required.
+
+### First-time setup
+
+1. SSH into your Synology (or use Container Manager → Project → Create via the UI)
+2. Create a `docker-compose.yml` with the contents from this repo (image is `avibarilan/harbor:latest`)
+3. All environment variables are already hardcoded in `docker-compose.yml` — no extra configuration needed
+4. Run:
+   ```bash
+   docker-compose pull && docker-compose up -d
+   ```
+
+### Updating
+
+**Via SSH:**
+```bash
+docker-compose pull && docker-compose up -d
+```
+
+**Via Container Manager UI:**
+Container Manager → select the harbor container → Stop → Action → Pull latest image → Start
 
 ---
 
