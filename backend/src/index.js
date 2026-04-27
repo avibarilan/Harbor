@@ -12,6 +12,7 @@ import { attachHarborWs } from './websocket/harborWs.js';
 
 import authRoutes from './routes/auth.js';
 import sitesRoutes from './routes/sites.js';
+import locationsRoutes from './routes/locations.js';
 import instancesRoutes from './routes/instances.js';
 import entitiesRoutes from './routes/entities.js';
 import automationsRoutes from './routes/automations.js';
@@ -37,9 +38,9 @@ const httpServer = createServer(app);
 app.use(cors());
 app.use(express.json());
 
-// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/sites', sitesRoutes);
+app.use('/api/locations', locationsRoutes);
 app.use('/api/instances', instancesRoutes);
 app.use('/api/instances', entitiesRoutes);
 app.use('/api/instances', automationsRoutes);
@@ -54,10 +55,9 @@ app.use('/api/search', searchRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/harbor', harborRoutes);
-app.use('/api/companion', companionPublicRouter);   // unauthenticated — companion phones home
+app.use('/api/companion', companionPublicRouter);
 app.use('/api/instances', companionRoutes);
 
-// Serve React build in production
 const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir));
 app.get('*', (req, res) => {
@@ -71,7 +71,6 @@ async function start() {
   const wsManager = new WebSocketManager();
   wsManager.start();
 
-  // Attach Harbor frontend WebSocket relay at /ws
   attachHarborWs(httpServer, wsManager);
 
   httpServer.listen(PORT, () => {

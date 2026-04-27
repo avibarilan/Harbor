@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useSites } from '../context/SitesContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
-import { Settings, KeyRound, Download, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { Settings, KeyRound, Download, RefreshCw, CheckCircle, AlertCircle, ExternalLink, MapPin, Plus, Pencil, Trash2, X } from 'lucide-react';
 
 function ChangePasswordForm() {
   const { toast } = useToast();
@@ -52,11 +53,145 @@ function ChangePasswordForm() {
         {error && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{error}</p>}
         <div className="flex justify-end">
           <button type="submit" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
-            {saving && <Spinner size="sm" />}
-            {saving ? 'Saving…' : 'Change password'}
+            {saving && <Spinner size="sm" />} {saving ? 'Saving…' : 'Change password'}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function LocationsSection() {
+  const { locations, instances, refresh } = useSites();
+  const { toast } = useToast();
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [newName, setNewName] = useState('');
+  const [addingNew, setAddingNew] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const instanceCount = (locId) => instances.filter(i => i.location_id === locId).length;
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      await api.post('/locations', { name: newName.trim() });
+      await refresh();
+      setNewName('');
+      setAddingNew(false);
+      toast('Location created', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRename = async (id) => {
+    if (!editName.trim()) return;
+    setSaving(true);
+    try {
+      await api.put(`/locations/${id}`, { name: editName.trim() });
+      await refresh();
+      setEditingId(null);
+      toast('Location renamed', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (loc) => {
+    try {
+      await api.delete(`/locations/${loc.id}`);
+      await refresh();
+      toast(`Location "${loc.name}" deleted`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    setDeleteConfirm(null);
+  };
+
+  return (
+    <div className="card p-5 max-w-md">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+          <MapPin size={15} className="text-harbor-500" /> Locations
+        </h2>
+        <button onClick={() => setAddingNew(true)} className="btn-sm btn-secondary flex items-center gap-1">
+          <Plus size={13} /> New
+        </button>
+      </div>
+
+      {addingNew && (
+        <form onSubmit={handleCreate} className="flex gap-2 mb-3">
+          <input
+            className="input flex-1"
+            placeholder="Location name…"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" disabled={saving || !newName.trim()} className="btn-sm btn-primary">
+            {saving ? <Spinner size="sm" /> : 'Add'}
+          </button>
+          <button type="button" onClick={() => { setAddingNew(false); setNewName(''); }} className="btn-sm btn-ghost">
+            <X size={14} />
+          </button>
+        </form>
+      )}
+
+      {locations.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-4">No locations yet. Create one to group instances on the dashboard.</p>
+      ) : (
+        <div className="space-y-1">
+          {locations.map(loc => (
+            <div key={loc.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-800">
+              <MapPin size={13} className="text-gray-400 shrink-0" />
+              {editingId === loc.id ? (
+                <input
+                  className="input flex-1 py-0.5 text-sm"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleRename(loc.id); if (e.key === 'Escape') setEditingId(null); }}
+                  autoFocus
+                />
+              ) : (
+                <span className="flex-1 text-sm text-gray-800 dark:text-gray-200">{loc.name}</span>
+              )}
+              <span className="text-xs text-gray-400">{instanceCount(loc.id)} inst.</span>
+              {editingId === loc.id ? (
+                <>
+                  <button onClick={() => handleRename(loc.id)} disabled={saving} className="btn-ghost btn-sm text-green-600"><CheckCircle size={13} /></button>
+                  <button onClick={() => setEditingId(null)} className="btn-ghost btn-sm"><X size={13} /></button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => { setEditingId(loc.id); setEditName(loc.name); }} className="btn-ghost btn-sm text-gray-400 hover:text-gray-600"><Pencil size={13} /></button>
+                  <button onClick={() => setDeleteConfirm(loc)} className="btn-ghost btn-sm text-gray-400 hover:text-red-600"><Trash2 size={13} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <ConfirmDialog
+          open
+          title="Delete location"
+          confirmLabel="Delete"
+          danger
+          onClose={() => setDeleteConfirm(null)}
+          onConfirm={() => handleDelete(deleteConfirm)}
+        >
+          Delete location <strong>{deleteConfirm.name}</strong>? Instances assigned to it will become ungrouped.
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
@@ -87,8 +222,7 @@ function HarborUpdatesSection() {
     setChecking(true);
     setError('');
     try {
-      const info = await api.post('/harbor/check-updates');
-      setVersionInfo(info);
+      setVersionInfo(await api.post('/harbor/check-updates'));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -122,6 +256,20 @@ function HarborUpdatesSection() {
 
   return (
     <>
+      {versionInfo?.updateAvailable && (
+        <div className="max-w-md mb-2 flex items-center gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl text-sm">
+          <Download size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
+          <span className="text-amber-700 dark:text-amber-300 font-medium">
+            Harbor v{versionInfo.latestVersion} is available
+          </span>
+          {versionInfo.releaseUrl && (
+            <a href={versionInfo.releaseUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-harbor-600 hover:underline flex items-center gap-1 text-xs">
+              Notes <ExternalLink size={11} />
+            </a>
+          )}
+        </div>
+      )}
+
       <div className="card p-5 max-w-md">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2">
           <Download size={15} className="text-harbor-500" /> Harbor Updates
@@ -130,8 +278,7 @@ function HarborUpdatesSection() {
         {updateStarted ? (
           <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 space-y-1">
             <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-              <RefreshCw size={15} className="animate-spin" />
-              Update in progress
+              <RefreshCw size={15} className="animate-spin" /> Update in progress
             </div>
             <p className="text-xs text-blue-600 dark:text-blue-400 pl-5">
               Harbor is restarting with the new version. Refresh this page in ~30 seconds.
@@ -168,57 +315,27 @@ function HarborUpdatesSection() {
               </div>
             )}
 
-            {versionInfo?.updateAvailable && (
-              <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                  Update available: v{versionInfo.latestVersion}
-                </p>
-                {versionInfo.releaseUrl && (
-                  <a
-                    href={versionInfo.releaseUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-harbor-600 dark:text-harbor-400 hover:underline"
-                  >
-                    View release notes <ExternalLink size={11} />
-                  </a>
-                )}
-              </div>
-            )}
-
             {!versionInfo?.dockerAvailable && (
               <div className="flex items-start gap-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 p-2.5 text-xs text-gray-500 dark:text-gray-400">
                 <AlertCircle size={13} className="mt-0.5 shrink-0" />
                 <span>
                   Docker socket not mounted — one-click updates unavailable.
-                  Mount <code className="font-mono text-gray-600 dark:text-gray-300">/var/run/docker.sock</code> in your compose file to enable this feature.
+                  Mount <code className="font-mono text-gray-600 dark:text-gray-300">/var/run/docker.sock</code> to enable.
                 </span>
               </div>
             )}
 
             {error && (
-              <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
-                {error}
-              </p>
+              <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{error}</p>
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <button
-                onClick={handleCheckUpdates}
-                disabled={checking}
-                className="btn-sm btn-secondary flex items-center gap-1.5"
-              >
-                {checking ? <Spinner size="sm" /> : <RefreshCw size={13} />}
-                Check for updates
+              <button onClick={handleCheckUpdates} disabled={checking} className="btn-sm btn-secondary flex items-center gap-1.5">
+                {checking ? <Spinner size="sm" /> : <RefreshCw size={13} />} Check for updates
               </button>
-
               {versionInfo?.updateAvailable && versionInfo?.dockerAvailable && (
-                <button
-                  onClick={() => setShowConfirm(true)}
-                  className="btn-sm btn-primary flex items-center gap-1.5"
-                >
-                  <Download size={13} />
-                  Update to v{versionInfo.latestVersion}
+                <button onClick={() => setShowConfirm(true)} className="btn-sm btn-primary flex items-center gap-1.5">
+                  <Download size={13} /> Update to v{versionInfo.latestVersion}
                 </button>
               )}
             </div>
@@ -239,8 +356,7 @@ function HarborUpdatesSection() {
           <strong className="text-gray-900 dark:text-white">v{versionInfo?.latestVersion}</strong> and restart.
         </p>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          The new image will be pulled first (may take 1–2 minutes), then Harbor will restart automatically.
-          Refresh this page after ~30 seconds. Your data will not be affected.
+          The new image will be pulled first (may take 1–2 minutes), then Harbor will restart. Refresh after ~30 seconds. Your data will not be affected.
         </p>
       </ConfirmDialog>
     </>
@@ -273,7 +389,7 @@ export default function SettingsPage() {
       </div>
 
       <ChangePasswordForm />
-
+      <LocationsSection />
       <HarborUpdatesSection />
     </div>
   );

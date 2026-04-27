@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { randomBytes } from 'crypto';
 import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logAudit } from '../utils/audit.js';
@@ -9,23 +8,20 @@ import { getInstance } from '../utils/haApi.js';
 export const companionPublicRouter = Router();
 
 companionPublicRouter.post('/register', (req, res) => {
-  const { instance_id, ingress_token, secret } = req.body ?? {};
-  if (!instance_id || !ingress_token || !secret) {
-    return res.status(400).json({ error: 'instance_id, ingress_token, and secret are required' });
+  const { instance_id, companion_url, secret } = req.body ?? {};
+  if (!instance_id || !companion_url || !secret) {
+    return res.status(400).json({ error: 'instance_id, companion_url, and secret are required' });
   }
 
   const db = getDb();
-  const inst = db.prepare('SELECT * FROM instances WHERE id = ?').get(instance_id);
+  const inst = db.prepare('SELECT id, site_id FROM instances WHERE id = ?').get(instance_id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
-  if (!inst.companion_registration_secret || inst.companion_registration_secret !== secret) {
-    return res.status(401).json({ error: 'Invalid registration secret' });
-  }
 
   db.prepare(
-    'UPDATE instances SET companion_enabled = 1, companion_ingress_token = ?, companion_registration_secret = NULL WHERE id = ?'
-  ).run(ingress_token, inst.id);
+    'UPDATE instances SET companion_enabled = 1, companion_url = ?, companion_secret = ?, companion_registration_secret = NULL WHERE id = ?'
+  ).run(companion_url.replace(/\/$/, ''), secret, inst.id);
 
-  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_registered', details: 'Companion registered via phone-home' });
+  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_registered', details: `Companion registered from ${companion_url}` });
   res.json({ ok: true });
 });
 
@@ -35,26 +31,23 @@ router.use(requireAuth);
 
 router.get('/:id/companion', (req, res) => {
   const inst = getDb().prepare(
-    'SELECT id, companion_enabled, companion_ingress_token, companion_registration_secret FROM instances WHERE id = ?'
+    'SELECT id, companion_enabled, companion_url, companion_registration_secret FROM instances WHERE id = ?'
   ).get(req.params.id);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
   res.json({
     enabled: !!inst.companion_enabled,
     pending: !inst.companion_enabled && !!inst.companion_registration_secret,
-    ingress_token: inst.companion_ingress_token || null,
+    companion_url: inst.companion_url || null,
   });
 });
 
 router.post('/:id/companion/enable', (req, res) => {
   const inst = getInstance(req.params.id);
-  const secret = randomBytes(32).toString('hex');
-
   getDb().prepare(
-    'UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_registration_secret = ? WHERE id = ?'
-  ).run(secret, inst.id);
-
-  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_enable_initiated', details: 'Registration secret generated; awaiting companion phone-home' });
-  res.json({ ok: true, pending: true, instance_id: inst.id, registration_secret: secret });
+    'UPDATE instances SET companion_enabled = 0, companion_url = NULL, companion_secret = NULL, companion_registration_secret = NULL WHERE id = ?'
+  ).run(inst.id);
+  logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_enable_initiated', details: 'Awaiting companion phone-home' });
+  res.json({ ok: true, pending: true, instance_id: inst.id });
 });
 
 router.delete('/:id/companion', (req, res) => {
@@ -62,7 +55,7 @@ router.delete('/:id/companion', (req, res) => {
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
 
   getDb().prepare(
-    'UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_registration_secret = NULL WHERE id = ?'
+    'UPDATE instances SET companion_enabled = 0, companion_url = NULL, companion_secret = NULL, companion_registration_secret = NULL WHERE id = ?'
   ).run(req.params.id);
   logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'companion_disabled', details: 'Companion disabled' });
   res.json({ ok: true });

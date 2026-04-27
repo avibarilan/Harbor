@@ -9,6 +9,15 @@ export function getDb() {
   return db;
 }
 
+// Returns the ID of the hidden system site used for instances with no explicit location.
+export function getSystemSiteId() {
+  const row = db.prepare("SELECT value FROM harbor_settings WHERE key = 'system_site_id'").get();
+  if (row) return parseInt(row.value, 10);
+  const result = db.prepare("INSERT INTO sites (name) VALUES ('_harbor_system')").run();
+  db.prepare("INSERT INTO harbor_settings (key, value) VALUES ('system_site_id', ?)").run(String(result.lastInsertRowid));
+  return result.lastInsertRowid;
+}
+
 export function initDb() {
   const dataDir = process.env.DATA_DIR || './data';
   fs.mkdirSync(dataDir, { recursive: true });
@@ -35,9 +44,17 @@ export function initDb() {
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS locations (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      notes      TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS instances (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       site_id           INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      location_id       INTEGER REFERENCES locations(id) ON DELETE SET NULL,
       name              TEXT NOT NULL,
       url               TEXT NOT NULL,
       token_encrypted   TEXT NOT NULL,
@@ -73,17 +90,21 @@ export function initDb() {
     );
   `);
 
-  // Migrations for columns added after initial release
+  // Column migrations — each wrapped in try/catch (no IF NOT EXISTS for ADD/DROP COLUMN)
   try { db.exec("ALTER TABLE instances ADD COLUMN cloudflare_proxied INTEGER DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_enabled INTEGER DEFAULT 0"); } catch {}
-  // v1.2 → v1.3: migrate from secret-based companion to Ingress-based companion
+  // v1.2→v1.3: dropped secret-based columns, added Ingress-based token
   try { db.exec("ALTER TABLE instances DROP COLUMN companion_url"); } catch {}
   try { db.exec("ALTER TABLE instances DROP COLUMN companion_secret"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_ingress_token TEXT"); } catch {}
-  // Reset any previously-enabled companions so users re-enable via the new Ingress flow
   try { db.exec("UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL WHERE companion_enabled = 1"); } catch {}
-  // v1.3 → v1.4: companion now phones home; store the one-time registration secret
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_registration_secret TEXT"); } catch {}
+  // v1.4: locations + direct companion (port-based) restored
+  try { db.exec("ALTER TABLE instances ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_url TEXT"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_secret TEXT"); } catch {}
+  // Reset any Ingress-based companions so they re-register with the new direct-URL mechanism
+  try { db.exec("UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_secret = NULL, companion_url = NULL WHERE companion_ingress_token IS NOT NULL"); } catch {}
 
   return db;
 }

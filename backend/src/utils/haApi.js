@@ -6,10 +6,6 @@ function baseUrl(inst) {
   return inst.url.replace(/\/$/, '');
 }
 
-function ingressBase(inst) {
-  return `${baseUrl(inst)}/api/hassio_ingress/${inst.companion_ingress_token}`;
-}
-
 export function getInstance(id) {
   const inst = getDb().prepare('SELECT * FROM instances WHERE id = ?').get(id);
   if (!inst) throw Object.assign(new Error('Instance not found'), { status: 404 });
@@ -59,24 +55,14 @@ export async function haDelete(inst, path) {
   return res.json().catch(() => ({}));
 }
 
-export async function haStream(inst, path, res) {
-  const token = getToken(inst);
-  const upstream = await fetch(`${baseUrl(inst)}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!upstream.ok) throw Object.assign(new Error(`HA stream error ${upstream.status}`), { status: upstream.status });
-  return upstream;
-}
-
 export async function callCompanion(inst, path, method = 'GET', body = undefined) {
-  if (!inst.companion_enabled || !inst.companion_ingress_token) {
+  if (!inst.companion_enabled || !inst.companion_url || !inst.companion_secret) {
     throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
   }
-  const token = getToken(inst);
-  const url = ingressBase(inst) + path;
+  const url = inst.companion_url.replace(/\/$/, '') + path;
   const opts = {
     method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { 'X-Harbor-Secret': inst.companion_secret, 'Content-Type': 'application/json' },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
@@ -89,12 +75,11 @@ export async function callCompanion(inst, path, method = 'GET', body = undefined
 }
 
 export async function streamCompanion(inst, path) {
-  if (!inst.companion_enabled || !inst.companion_ingress_token) {
+  if (!inst.companion_enabled || !inst.companion_url || !inst.companion_secret) {
     throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
   }
-  const token = getToken(inst);
-  const url = ingressBase(inst) + path;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const url = inst.companion_url.replace(/\/$/, '') + path;
+  const res = await fetch(url, { headers: { 'X-Harbor-Secret': inst.companion_secret } });
   if (!res.ok) {
     throw Object.assign(new Error(`Companion stream error ${res.status}`), { status: res.status });
   }
@@ -108,14 +93,12 @@ export function callHaWs(inst, message) {
     const ws = new WebSocket(wsUrl);
     const timeout = setTimeout(() => { ws.terminate(); reject(new Error('WS timeout')); }, 10000);
     let msgId = 1;
-    let phase = 'auth';
 
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw);
       if (msg.type === 'auth_required') {
         ws.send(JSON.stringify({ type: 'auth', access_token: token }));
       } else if (msg.type === 'auth_ok') {
-        phase = 'command';
         ws.send(JSON.stringify({ ...message, id: msgId }));
       } else if (msg.type === 'auth_invalid') {
         clearTimeout(timeout);

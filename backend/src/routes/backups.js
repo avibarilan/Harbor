@@ -6,12 +6,8 @@ import { logAudit } from '../utils/audit.js';
 const router = Router();
 router.use(requireAuth);
 
-function getInst(id) {
-  return getInstance(id);
-}
-
 router.get('/:id/backups', async (req, res) => {
-  const inst = getInst(req.params.id);
+  const inst = getInstance(req.params.id);
   if (!inst.companion_enabled) return res.json([]);
   try {
     const data = await callCompanion(inst, '/backups');
@@ -22,7 +18,7 @@ router.get('/:id/backups', async (req, res) => {
 });
 
 router.post('/:id/backups', async (req, res) => {
-  const inst = getInst(req.params.id);
+  const inst = getInstance(req.params.id);
   if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
     const data = await callCompanion(inst, '/backups/new', 'POST');
@@ -34,7 +30,7 @@ router.post('/:id/backups', async (req, res) => {
 });
 
 router.get('/:id/backups/:slug/info', async (req, res) => {
-  const inst = getInst(req.params.id);
+  const inst = getInstance(req.params.id);
   if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
     const data = await callCompanion(inst, `/backups/${req.params.slug}/info`);
@@ -45,7 +41,7 @@ router.get('/:id/backups/:slug/info', async (req, res) => {
 });
 
 router.post('/:id/backups/:slug/restore', async (req, res) => {
-  const inst = getInst(req.params.id);
+  const inst = getInstance(req.params.id);
   if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
     const data = await callCompanion(inst, `/backups/${req.params.slug}/restore`, 'POST');
@@ -56,8 +52,20 @@ router.post('/:id/backups/:slug/restore', async (req, res) => {
   }
 });
 
+router.delete('/:id/backups/:slug', async (req, res) => {
+  const inst = getInstance(req.params.id);
+  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
+  try {
+    const data = await callCompanion(inst, `/backups/${req.params.slug}`, 'DELETE');
+    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'backup_deleted', details: `Backup ${req.params.slug} deleted` });
+    res.json(data);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 router.get('/:id/backups/:slug/download', async (req, res) => {
-  const inst = getInst(req.params.id);
+  const inst = getInstance(req.params.id);
   if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
   try {
     const upstream = await streamCompanion(inst, `/backups/${req.params.slug}/download`);
