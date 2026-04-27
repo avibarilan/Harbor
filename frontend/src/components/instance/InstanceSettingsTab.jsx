@@ -25,6 +25,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Companion state
+  const [companionUrl, setCompanionUrl] = useState(inst.companion_url || '');
   const [companionEnabling, setCompanionEnabling] = useState(false);
   const [companionError, setCompanionError] = useState('');
   const [removeCompanionConfirm, setRemoveCompanionConfirm] = useState(false);
@@ -82,7 +83,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
     setCompanionEnabling(true);
     setCompanionError('');
     try {
-      const result = await api.post(`/instances/${inst.id}/companion/enable`, {});
+      const result = await api.post(`/instances/${inst.id}/companion/enable`, { companion_url: companionUrl.trim() });
       setSetupInfo(result);
       setCheckStatusMsg('');
     } catch (err) {
@@ -199,25 +200,25 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Harbor Companion</h2>
           {companionEnabled && (
-            <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected via Ingress</span>
+            <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected</span>
           )}
         </div>
 
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Install the Harbor Companion add-on in Home Assistant to enable backup management, updates,
-          add-on control, logs, and host reboot/shutdown from Harbor. Harbor connects automatically
-          using Home Assistant's native Ingress system — no port forwarding or manual URL needed.
+          add-on control, and host reboot/shutdown from Harbor. Harbor connects to the companion
+          directly using a URL and shared secret.
         </p>
 
         {companionEnabled ? (
-          <div className="card p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-              <Link size={14} />
-              <span>Connected via Home Assistant Ingress</span>
+          <div className="card p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 min-w-0">
+              <Link size={14} className="shrink-0" />
+              <span className="truncate">{inst.companion_url || 'Connected'}</span>
             </div>
             <button
               onClick={() => setRemoveCompanionConfirm(true)}
-              className="btn-sm btn-danger flex items-center gap-1.5"
+              className="btn-sm btn-danger flex items-center gap-1.5 shrink-0"
             >
               <Unplug size={12} /> Disable
             </button>
@@ -278,12 +279,24 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
           </div>
         ) : (
           <div className="card p-4 space-y-3">
+            <div>
+              <label className="label">Companion URL</label>
+              <input
+                className="input"
+                placeholder="https://havm-beta-companion.example.com"
+                value={companionUrl}
+                onChange={e => setCompanionUrl(e.target.value)}
+              />
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                The direct URL Harbor will use to reach the Companion add-on.
+              </p>
+            </div>
             {companionError && <p className="text-sm text-red-600 dark:text-red-400">{companionError}</p>}
             <div className="flex justify-end">
               <button
                 type="button"
                 onClick={handleEnableCompanion}
-                disabled={companionEnabling}
+                disabled={companionEnabling || !companionUrl.trim()}
                 className="btn-md btn-primary flex items-center gap-2"
               >
                 {companionEnabling && <Spinner size="sm" />}
