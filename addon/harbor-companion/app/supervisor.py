@@ -1,5 +1,9 @@
+import logging
 import os
+
 import httpx
+
+log = logging.getLogger("harbor-companion")
 
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "").strip()
 BASE_URL = "http://supervisor"
@@ -51,11 +55,34 @@ async def get_info() -> dict:
 
 
 async def get_ingress_token() -> str:
-    data = await _get("/addons/self/info")
-    token = data.get("data", {}).get("ingress_token", "")
-    if not token:
-        raise SupervisorError("ingress_token missing from /addons/self/info response")
-    return token
+    # Log full /addons/self/info response so we can see all available fields
+    self_info = await _get("/addons/self/info")
+    log.info(f"[ingress-token] /addons/self/info full response: {self_info}")
+    token = self_info.get("data", {}).get("ingress_token", "")
+    if token:
+        return token
+
+    # /addons/self/info didn't have it — try /ingress/panels
+    panels_data = await _get("/ingress/panels")
+    log.info(f"[ingress-token] /ingress/panels full response: {panels_data}")
+    panels = panels_data.get("data", {}).get("panels", {})
+    # panels is a dict keyed by add-on slug; find ours
+    for slug, panel in panels.items():
+        if slug == "harbor_companion":
+            token = panel.get("ingress_token", "")
+            if token:
+                log.info(f"[ingress-token] found token in /ingress/panels under slug '{slug}'")
+                return token
+    # Also check by ingress_entry key format used in some HA versions
+    entry = panels.get("harbor_companion") or panels.get("a0d7b954_harbor_companion")
+    if entry:
+        token = entry.get("ingress_token", "")
+        if token:
+            return token
+
+    raise SupervisorError(
+        "ingress_token not found in /addons/self/info or /ingress/panels — check add-on logs for full responses"
+    )
 
 
 async def get_ha_version() -> str:
