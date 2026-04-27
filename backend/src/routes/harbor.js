@@ -13,7 +13,7 @@ const DOCKER_IMAGE = 'ghcr.io/avibarilan/harbor';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 function getCurrentVersion() {
-  return process.env.HARBOR_VERSION || 'dev';
+  return process.env.HARBOR_VERSION || 'Dev';
 }
 
 // Returns true if semver a is strictly greater than b (strips leading 'v')
