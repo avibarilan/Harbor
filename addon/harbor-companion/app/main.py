@@ -12,7 +12,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.2.0"
+VERSION = "1.1.1"
 
 app = FastAPI(title="Harbor Companion", version=VERSION)
 
