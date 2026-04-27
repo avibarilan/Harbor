@@ -4,7 +4,7 @@ import logging
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import supervisor as sup
 
@@ -14,6 +14,15 @@ log = logging.getLogger("harbor-companion")
 VERSION = "1.2.0"
 
 app = FastAPI(title="Harbor Companion", version=VERSION)
+
+
+@app.middleware("http")
+async def strip_prefix(request: Request, call_next):
+    if request.scope["path"].startswith("/companion"):
+        request.scope["path"] = request.scope["path"][len("/companion"):]
+        if not request.scope["path"]:
+            request.scope["path"] = "/"
+    return await call_next(request)
 
 
 async def _register_with_harbor():
