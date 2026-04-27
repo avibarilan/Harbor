@@ -26,7 +26,7 @@ async def strip_prefix(request: Request, call_next):
 
 
 async def _register_with_harbor():
-    """Fetch our own ingress token from the Supervisor, then POST it to Harbor."""
+    """POST registration details to Harbor so it can reach this companion directly."""
     try:
         with open("/data/options.json") as f:
             opts = json.load(f)
@@ -37,29 +37,24 @@ async def _register_with_harbor():
     harbor_url = opts.get("harbor_url", "").strip().rstrip("/")
     instance_id = str(opts.get("instance_id", "")).strip()
     harbor_secret = opts.get("harbor_secret", "").strip()
+    companion_url = opts.get("companion_url", "").strip().rstrip("/")
 
     if not harbor_url or not instance_id or not harbor_secret:
         log.info("Harbor registration not configured in add-on options — skipping")
         return
 
-    try:
-        ingress_token = await sup.get_ingress_token()
-    except Exception as e:
-        log.warning(f"Could not retrieve ingress token from Supervisor: {e}")
-        return
+    log.info(f"Registering with Harbor at {harbor_url} (instance {instance_id})")
+    log.info(f"companion_url being sent: '{companion_url}'")
+
+    payload = {"instance_id": instance_id, "secret": harbor_secret}
+    if companion_url:
+        payload["companion_url"] = companion_url
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(
-                f"{harbor_url}/api/companion/register",
-                json={
-                    "instance_id": instance_id,
-                    "ingress_token": ingress_token,
-                    "secret": harbor_secret,
-                },
-            )
+            r = await client.post(f"{harbor_url}/api/companion/register", json=payload)
         if r.is_success:
-            log.info(f"Registered with Harbor at {harbor_url} (instance {instance_id})")
+            log.info(f"Registered with Harbor successfully (companion_url={companion_url or 'not set'})")
         else:
             log.warning(f"Harbor registration failed {r.status_code}: {r.text}")
     except Exception as e:

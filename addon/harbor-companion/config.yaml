@@ -21,7 +21,9 @@ options:
   harbor_url: ""
   instance_id: ""
   harbor_secret: ""
+  companion_url: ""
 schema:
   harbor_url: str
   instance_id: str
   harbor_secret: str
+  companion_url: str
