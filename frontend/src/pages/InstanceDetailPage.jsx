@@ -7,6 +7,7 @@ import { useWs } from '../context/WsContext.jsx';
 import StatusDot from '../components/ui/StatusDot.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import InstanceActionButtons from '../components/ui/InstanceActionButtons.jsx';
+import Tooltip from '../components/ui/Tooltip.jsx';
 import EntitiesTab      from '../components/instance/EntitiesTab.jsx';
 import AutomationsTab   from '../components/instance/AutomationsTab.jsx';
 import ScriptsScenesTab from '../components/instance/ScriptsScenesTab.jsx';
@@ -30,10 +31,19 @@ const TABS = [
   { key: 'settings',    label: 'Settings' },
 ];
 
+function timeAgo(dateStr) {
+  if (!dateStr) return null;
+  const secs = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
 export default function InstanceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { sites } = useSites();
+  const { locations } = useSites();
   const { statuses } = useWs();
   const [searchParams, setSearchParams] = useSearchParams();
   const [inst, setInst] = useState(null);
@@ -50,74 +60,87 @@ export default function InstanceDetailPage() {
       .finally(() => setLoading(false));
   }, [id, navigate]);
 
-  // Refresh instance data (e.g. after settings save)
   const refreshInst = () => api.get(`/instances/${id}`).then(setInst).catch(() => {});
 
   if (loading) return <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>;
   if (!inst) return null;
 
   const liveStatus = statuses[inst.id] || inst.status;
-  const site = sites.find(s => s.instances?.some(i => i.id === inst.id));
+  const location = locations.find(l => l.id === inst.location_id);
   const isOffline = liveStatus !== 'connected';
   const isAuthFailed = liveStatus === 'auth_failed';
-
   const instWithStatus = { ...inst, status: liveStatus };
 
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 pt-5 pb-0 shrink-0">
+      <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 pt-4 pb-0 shrink-0">
         {/* Breadcrumb */}
         <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-3">
-          <Link to="/" className="hover:text-gray-600 dark:hover:text-gray-300">Dashboard</Link>
-          <ChevronRight size={12} />
-          {site && <Link to={`/sites/${site.id}`} className="hover:text-gray-600 dark:hover:text-gray-300">{site.name}</Link>}
-          {site && <ChevronRight size={12} />}
+          <Link to="/" className="hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Dashboard</Link>
+          {location && (
+            <>
+              <ChevronRight size={11} />
+              <span className="text-gray-400">{location.name}</span>
+            </>
+          )}
+          <ChevronRight size={11} />
           <span className="text-gray-600 dark:text-gray-300">{inst.name}</span>
         </div>
 
         {/* Title row */}
-        <div className="flex items-start gap-4 mb-4">
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <StatusDot status={liveStatus} />
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white truncate">{inst.name}</h1>
-            {inst.ha_version && (
-              <span className="text-xs font-mono text-gray-400 dark:text-gray-500 shrink-0">{inst.ha_version}</span>
-            )}
+        <div className="flex items-start gap-4 mb-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <StatusDot status={liveStatus} />
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white truncate">{inst.name}</h1>
+            </div>
+            <div className="flex items-center gap-3 mt-1 ml-[18px]">
+              {inst.ha_version && (
+                <span className="text-xs font-mono text-gray-400">{inst.ha_version}</span>
+              )}
+              {isOffline && inst.last_seen && (
+                <span className="text-xs text-gray-400">Last seen {timeAgo(inst.last_seen)}</span>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <InstanceActionButtons instance={instWithStatus} />
-            <a
-              href={inst.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-md btn-secondary flex items-center gap-1.5"
-            >
-              <ExternalLink size={14} />
-              <span className="hidden sm:inline">Open in HA</span>
-            </a>
+            <Tooltip content="Open in Home Assistant">
+              <a
+                href={inst.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-ghost btn-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              >
+                <ExternalLink size={14} />
+              </a>
+            </Tooltip>
           </div>
         </div>
 
         {/* Status banners */}
         {isAuthFailed && (
-          <div className="flex items-center gap-3 mb-4 px-3 py-2.5 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm">
-            <AlertTriangle size={15} className="text-orange-500 shrink-0" />
-            <div className="flex-1">
-              <span className="font-medium text-orange-700 dark:text-orange-400">Authentication failed — </span>
-              <span className="text-orange-600 dark:text-orange-500">the access token was revoked or is invalid.</span>
-            </div>
-            <button onClick={() => setTab('settings')} className="btn-sm bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/60 shrink-0">
+          <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm">
+            <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+            <span className="text-amber-700 dark:text-amber-400 flex-1 text-xs">
+              Authentication failed — token was revoked or is invalid.
+            </span>
+            <button
+              onClick={() => setTab('settings')}
+              className="text-xs font-medium text-amber-700 dark:text-amber-400 hover:underline shrink-0"
+            >
               Update token
             </button>
           </div>
         )}
         {liveStatus === 'disconnected' && (
-          <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
-            <WifiOff size={13} className="shrink-0" />
-            Instance offline — showing last known state. Retrying in background.
-            {inst.last_seen && <span className="ml-1 text-red-400">Last seen {new Date(inst.last_seen).toLocaleString()}</span>}
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <WifiOff size={12} className="text-red-500 shrink-0" />
+            <span className="text-xs text-red-600 dark:text-red-400">
+              Instance offline — showing last known state. Retrying in background.
+            </span>
           </div>
         )}
 

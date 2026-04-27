@@ -3,7 +3,7 @@ import clsx from 'clsx';
 const colors = {
   connected:    'bg-green-500',
   disconnected: 'bg-red-500',
-  auth_failed:  'bg-orange-500',
+  auth_failed:  'bg-amber-500',
   unknown:      'bg-gray-400',
 };
 

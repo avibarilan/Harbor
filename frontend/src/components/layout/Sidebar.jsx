@@ -1,5 +1,5 @@
 import { NavLink, Link } from 'react-router-dom';
-import { LayoutDashboard, Search, ScrollText, Settings, ChevronRight, ChevronDown, MapPin, Bell } from 'lucide-react';
+import { LayoutDashboard, Search, ScrollText, Settings, ChevronRight, ChevronDown, MapPin, Anchor } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useWs } from '../../context/WsContext.jsx';
 import { useSites } from '../../context/SitesContext.jsx';
@@ -7,23 +7,27 @@ import { api } from '../../api/client.js';
 import StatusDot from '../ui/StatusDot.jsx';
 import clsx from 'clsx';
 
+const NAV_ITEMS = [
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/search', label: 'Search', icon: Search },
+  { to: '/audit', label: 'Audit Log', icon: ScrollText },
+  { to: '/settings', label: 'Settings', icon: Settings },
+];
+
 export default function Sidebar() {
   const { instances, locations } = useSites();
   const { statuses } = useWs();
   const [expandedLocs, setExpandedLocs] = useState({});
-  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [version, setVersion] = useState('');
 
   useEffect(() => {
     api.get('/harbor/version').then(info => {
-      setUpdateAvailable(info.updateAvailable || false);
       setVersion(info.version || '');
     }).catch(() => {});
   }, []);
 
   const toggleLoc = (id) => setExpandedLocs(e => ({ ...e, [id]: !e[id] }));
 
-  // Split instances into location groups + ungrouped
   const byLocation = {};
   const ungrouped = [];
   for (const inst of instances) {
@@ -35,99 +39,60 @@ export default function Sidebar() {
     }
   }
 
+  const navCls = ({ isActive }) => clsx(
+    'flex items-center gap-2.5 py-1.5 text-sm transition-colors border-l-[3px] pl-[13px] pr-3',
+    isActive
+      ? 'border-harbor-600 text-gray-900 dark:text-white font-medium'
+      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+  );
+
+  const instCls = ({ isActive }) => clsx(
+    'flex items-center gap-2 py-1.5 text-xs transition-colors border-l-[3px] pl-[13px] pr-2',
+    isActive
+      ? 'border-harbor-600 text-gray-900 dark:text-white font-medium'
+      : 'border-transparent text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+  );
+
   return (
-    <aside className="w-56 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shrink-0">
+    <aside className="w-[220px] flex flex-col bg-[#f1f5f9] dark:bg-gray-900 shrink-0 border-r border-gray-200 dark:border-gray-800">
       {/* Logo */}
-      <Link to="/" className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-200 dark:border-gray-800">
-        <div className="w-7 h-7 rounded-lg bg-harbor-600 flex items-center justify-center">
-          <span className="text-white font-bold text-sm">H</span>
-        </div>
-        <span className="font-semibold text-gray-900 dark:text-white tracking-tight">Harbor</span>
+      <Link to="/" className="flex items-center gap-2.5 px-4 py-[14px] border-b border-gray-200 dark:border-gray-800">
+        <Anchor size={18} className="text-harbor-600 shrink-0" />
+        <span className="font-semibold text-gray-900 dark:text-white tracking-tight text-[15px]">Harbor</span>
       </Link>
 
-      {/* Nav */}
-      <nav className="px-2 py-3 space-y-0.5">
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) => clsx(
-            'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors',
-            isActive ? 'bg-harbor-50 text-harbor-700 font-medium dark:bg-harbor-900/30 dark:text-harbor-400'
-                     : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-          )}
-        >
-          <LayoutDashboard size={16} /> Dashboard
-        </NavLink>
-        <NavLink
-          to="/search"
-          className={({ isActive }) => clsx(
-            'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors',
-            isActive ? 'bg-harbor-50 text-harbor-700 font-medium dark:bg-harbor-900/30 dark:text-harbor-400'
-                     : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-          )}
-        >
-          <Search size={16} /> Search
-        </NavLink>
-        <NavLink
-          to="/audit"
-          className={({ isActive }) => clsx(
-            'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors',
-            isActive ? 'bg-harbor-50 text-harbor-700 font-medium dark:bg-harbor-900/30 dark:text-harbor-400'
-                     : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-          )}
-        >
-          <ScrollText size={16} /> Audit Log
-        </NavLink>
-        <NavLink
-          to="/settings"
-          className={({ isActive }) => clsx(
-            'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors',
-            isActive ? 'bg-harbor-50 text-harbor-700 font-medium dark:bg-harbor-900/30 dark:text-harbor-400'
-                     : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-          )}
-        >
-          <Settings size={16} /> Settings
-          {updateAvailable && (
-            <span className="ml-auto flex items-center">
-              <Bell size={12} className="text-amber-500 animate-pulse" />
-            </span>
-          )}
-        </NavLink>
+      {/* Primary nav */}
+      <nav className="py-3 space-y-0.5">
+        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+          <NavLink key={to} to={to} end={end} className={navCls}>
+            <Icon size={15} className="shrink-0" />
+            {label}
+          </NavLink>
+        ))}
       </nav>
 
       {/* Instances list */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
-        <div className="flex items-center justify-between px-2 py-2 mt-2">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Instances</span>
-          <Link to="/adopt" className="text-xs text-harbor-600 hover:text-harbor-700 font-medium">+ Add</Link>
+      <div className="flex-1 overflow-y-auto pb-3 border-t border-gray-200 dark:border-gray-800 pt-3">
+        <div className="flex items-center justify-between px-4 mb-2">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Instances</span>
+          <Link to="/adopt" className="text-[11px] text-harbor-600 hover:text-harbor-700 font-medium">+ Add</Link>
         </div>
 
-        {/* Ungrouped instances */}
         {ungrouped.map(inst => (
-          <NavLink
-            key={inst.id}
-            to={`/instances/${inst.id}`}
-            className={({ isActive }) => clsx(
-              'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors',
-              isActive
-                ? 'bg-harbor-50 text-harbor-700 dark:bg-harbor-900/30 dark:text-harbor-400'
-                : 'text-gray-500 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-gray-800'
-            )}
-          >
+          <NavLink key={inst.id} to={`/instances/${inst.id}`} className={instCls}>
             <StatusDot status={statuses[inst.id] || inst.status} size="sm" />
             <span className="truncate">{inst.name}</span>
           </NavLink>
         ))}
 
-        {/* Location groups */}
         {locations.filter(l => byLocation[l.id]).map(loc => (
           <div key={loc.id}>
             <button
               onClick={() => toggleLoc(loc.id)}
-              className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              className="w-full flex items-center gap-1.5 pl-4 pr-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
             >
               {expandedLocs[loc.id] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <MapPin size={11} className="text-gray-400 shrink-0" />
+              <MapPin size={10} className="text-gray-400 shrink-0" />
               <span className="truncate flex-1 text-left font-medium">{loc.name}</span>
             </button>
             {expandedLocs[loc.id] && (byLocation[loc.id] || []).map(inst => (
@@ -135,10 +100,10 @@ export default function Sidebar() {
                 key={inst.id}
                 to={`/instances/${inst.id}`}
                 className={({ isActive }) => clsx(
-                  'flex items-center gap-2 pl-7 pr-2 py-1 rounded-lg text-xs transition-colors',
+                  'flex items-center gap-2 pl-8 pr-2 py-1.5 text-xs transition-colors border-l-[3px]',
                   isActive
-                    ? 'bg-harbor-50 text-harbor-700 dark:bg-harbor-900/30 dark:text-harbor-400'
-                    : 'text-gray-500 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-gray-800'
+                    ? 'border-harbor-600 text-gray-900 dark:text-white font-medium'
+                    : 'border-transparent text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 )}
               >
                 <StatusDot status={statuses[inst.id] || inst.status} size="sm" />
@@ -149,13 +114,10 @@ export default function Sidebar() {
         ))}
       </div>
 
-      {/* Version */}
+      {/* Version footer */}
       {version && (
-        <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
-          <span className="text-xs text-gray-400 dark:text-gray-600">Harbor v{version}</span>
-          {updateAvailable && (
-            <span className="badge badge-yellow text-xs">Update</span>
-          )}
+        <div className="px-4 py-2.5 border-t border-gray-200 dark:border-gray-800">
+          <span className="text-[11px] text-gray-400 dark:text-gray-600">Harbor v{version}</span>
         </div>
       )}
     </aside>

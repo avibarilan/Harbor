@@ -4,8 +4,9 @@ import logging
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import supervisor as sup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -16,13 +17,17 @@ VERSION = "1.2.0"
 app = FastAPI(title="Harbor Companion", version=VERSION)
 
 
-@app.middleware("http")
-async def strip_prefix(request: Request, call_next):
-    if request.scope["path"].startswith("/companion"):
-        request.scope["path"] = request.scope["path"][len("/companion"):]
-        if not request.scope["path"]:
-            request.scope["path"] = "/"
-    return await call_next(request)
+class StripPrefixMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        path = request.scope["path"]
+        if path.startswith("/companion"):
+            request.scope["path"] = path[len("/companion"):] or "/"
+            request.scope["raw_path"] = request.scope["path"].encode()
+        log.info(f"Request: {request.method} {request.scope['path']}")
+        return await call_next(request)
+
+
+app.add_middleware(StripPrefixMiddleware)
 
 
 async def _register_with_harbor():
