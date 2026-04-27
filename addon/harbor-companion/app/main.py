@@ -43,12 +43,14 @@ async def _register_with_harbor():
         log.info("Harbor registration not configured in add-on options — skipping")
         return
 
+    if not companion_url:
+        log.warning("companion_url is empty in add-on options — skipping registration (set it to the public URL of this companion, e.g. https://example.com/companion)")
+        return
+
     log.info(f"Registering with Harbor at {harbor_url} (instance {instance_id})")
     log.info(f"companion_url being sent: '{companion_url}'")
 
-    payload = {"instance_id": instance_id, "secret": harbor_secret}
-    if companion_url:
-        payload["companion_url"] = companion_url
+    payload = {"instance_id": instance_id, "secret": harbor_secret, "companion_url": companion_url}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
