@@ -1,11 +1,191 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { useSites } from '../../context/SitesContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
-import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Link, Copy } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Copy, WifiOff } from 'lucide-react';
+
+function timeAgo(dateStr) {
+  if (!dateStr) return null;
+  const secs = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+  if (secs < 10) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+function CompanionSection({ inst, onRefresh }) {
+  const { toast } = useToast();
+  const [status, setStatus] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [token, setToken] = useState(null);
+  const [disableConfirm, setDisableConfirm] = useState(false);
+  const [disabling, setDisabling] = useState(false);
+
+  const needsReconfig = inst.companion_enabled && !inst.companion_last_seen;
+
+  useEffect(() => {
+    if (!inst.companion_enabled) { setStatus(null); return; }
+    api.get(`/instances/${inst.id}/companion/status`).then(setStatus).catch(() => {});
+  }, [inst.id, inst.companion_enabled]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setToken(null);
+    try {
+      const res = await api.post(`/companion/token/${inst.id}`);
+      setToken(res.token);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    setDisabling(true);
+    try {
+      await api.delete(`/instances/${inst.id}/companion`);
+      setToken(null);
+      setStatus(null);
+      await onRefresh();
+      toast('Companion disabled', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setDisabling(false);
+      setDisableConfirm(false);
+    }
+  };
+
+  const copyToken = () => {
+    if (!token) return;
+    navigator.clipboard.writeText(token).then(() => toast('Copied!', 'success'));
+  };
+
+  const isOnline = status?.online;
+  const isEnabled = inst.companion_enabled;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Harbor Companion</h2>
+        {isEnabled && isOnline && (
+          <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected</span>
+        )}
+        {isEnabled && !isOnline && (
+          <span className="badge badge-yellow flex items-center gap-1"><WifiOff size={10} /> Offline</span>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Install the Harbor Companion add-on in Home Assistant to enable backup management, updates,
+        add-on control, and host reboot/shutdown. The companion polls Harbor for commands — only
+        outbound HTTPS from the HA instance is required.
+      </p>
+
+      {needsReconfig && (
+        <div className="flex items-start gap-2 px-3 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs">
+          <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+          <span className="text-amber-700 dark:text-amber-400">
+            Companion needs to be reconfigured for the new poll-based architecture. Generate a new setup token below.
+          </span>
+        </div>
+      )}
+
+      {isEnabled && isOnline && !needsReconfig ? (
+        <div className="card p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-green-600 dark:text-green-400 flex items-center gap-2">
+              <PlugZap size={14} />
+              <span>Connected</span>
+              {status?.version && <span className="text-gray-400 text-xs">v{status.version}</span>}
+            </div>
+            <button
+              onClick={() => setDisableConfirm(true)}
+              className="btn-sm btn-danger flex items-center gap-1.5"
+            >
+              <Unplug size={12} /> Disable
+            </button>
+          </div>
+          {status?.last_seen && (
+            <p className="text-xs text-gray-400">Last seen {timeAgo(status.last_seen)}</p>
+          )}
+        </div>
+      ) : isEnabled && !isOnline && !needsReconfig ? (
+        <div className="card p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
+              <WifiOff size={14} />
+              <span>Companion offline</span>
+            </div>
+            <button
+              onClick={() => setDisableConfirm(true)}
+              className="btn-sm btn-danger flex items-center gap-1.5"
+            >
+              <Unplug size={12} /> Disable
+            </button>
+          </div>
+          {status?.last_seen && (
+            <p className="text-xs text-gray-400">Last seen {timeAgo(status.last_seen)} — check the add-on in Home Assistant.</p>
+          )}
+        </div>
+      ) : (
+        <div className="card p-4 space-y-4">
+          {!token ? (
+            <>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Generate a setup token, then paste it into the Harbor Companion add-on configuration in Home Assistant.
+              </p>
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="btn-md btn-primary flex items-center gap-2"
+              >
+                {generating && <Spinner size="sm" />}
+                <PlugZap size={14} /> Generate Setup Token
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Paste this token into the Harbor Companion add-on configuration in Home Assistant.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-2 rounded border border-gray-200 dark:border-gray-700 break-all select-all">
+                  {token}
+                </code>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={copyToken} className="btn-sm btn-secondary flex items-center gap-1.5">
+                  <Copy size={12} /> Copy to clipboard
+                </button>
+                <button onClick={() => setToken(null)} className="btn-sm btn-ghost">
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">This token expires in 24 hours and can only be used once.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={disableConfirm}
+        title="Disable companion"
+        confirmLabel={disabling ? 'Disabling…' : 'Disable'}
+        danger
+        onClose={() => setDisableConfirm(false)}
+        onConfirm={handleDisable}
+      >
+        Disable the Harbor Companion for <strong>{inst.name}</strong>? Supervisor features will revert to the "Open in HA" placeholder. The add-on itself is not uninstalled.
+      </ConfirmDialog>
+    </div>
+  );
+}
 
 export default function InstanceSettingsTab({ inst, onSaved }) {
   const navigate = useNavigate();
@@ -24,18 +204,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
 
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
-  // Companion state
-  const [companionUrl, setCompanionUrl] = useState(inst.companion_url || '');
-  const [companionEnabling, setCompanionEnabling] = useState(false);
-  const [companionError, setCompanionError] = useState('');
-  const [removeCompanionConfirm, setRemoveCompanionConfirm] = useState(false);
-  const [setupInfo, setSetupInfo] = useState(null);   // { instance_id, registration_secret }
-  const [checkingStatus, setCheckingStatus] = useState(false);
-  const [checkStatusMsg, setCheckStatusMsg] = useState('');
-
-  const companionEnabled = !!inst.companion_enabled;
   const isAuthFailed = inst.status === 'auth_failed';
-  const harborOrigin = window.location.origin;
 
   const handleTest = async () => {
     setTesting(true);
@@ -76,62 +245,16 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
     await api.delete(`/instances/${inst.id}`);
     await refresh();
     toast(`Instance "${inst.name}" removed`, 'success');
-    navigate(`/`, { replace: true });
+    navigate('/', { replace: true });
   };
 
-  const handleEnableCompanion = async () => {
-    setCompanionEnabling(true);
-    setCompanionError('');
-    try {
-      const result = await api.post(`/instances/${inst.id}/companion/enable`, { companion_url: companionUrl.trim() });
-      setSetupInfo(result);
-      setCheckStatusMsg('');
-    } catch (err) {
-      setCompanionError(err.message);
-    } finally {
-      setCompanionEnabling(false);
-    }
-  };
-
-  const handleCheckStatus = async () => {
-    setCheckingStatus(true);
-    setCheckStatusMsg('');
-    try {
-      const res = await api.get(`/instances/${inst.id}/companion`);
-      if (res.enabled) {
-        setSetupInfo(null);
-        await refresh();
-        await onSaved();
-        toast('Companion connected!', 'success');
-      } else {
-        setCheckStatusMsg('Not registered yet — make sure the add-on is started.');
-      }
-    } catch (err) {
-      setCheckStatusMsg(err.message);
-    } finally {
-      setCheckingStatus(false);
-    }
-  };
-
-  const copyToClipboard = (value) => {
-    navigator.clipboard.writeText(value).then(() => toast('Copied!', 'success'));
-  };
-
-  const handleRemoveCompanion = async () => {
-    try {
-      await api.delete(`/instances/${inst.id}/companion`);
-      await refresh();
-      await onSaved();
-      toast('Companion disabled', 'success');
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-    setRemoveCompanionConfirm(false);
+  const handleRefresh = async () => {
+    await refresh();
+    await onSaved();
   };
 
   return (
     <div className="p-6 max-w-xl space-y-8">
-      {/* Auth failed warning */}
       {isAuthFailed && (
         <div className="flex items-start gap-2 px-3 py-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm">
           <AlertTriangle size={15} className="text-orange-500 shrink-0 mt-0.5" />
@@ -142,7 +265,6 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         </div>
       )}
 
-      {/* Edit form */}
       <form onSubmit={handleSave} className="space-y-4">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Instance configuration</h2>
 
@@ -173,7 +295,6 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
           <input className="input bg-gray-50 dark:bg-gray-800/60" value={inst.installation_type || 'Unknown'} readOnly />
         </div>
 
-        {/* Test connection */}
         <div className="flex items-center gap-2 flex-wrap">
           <button type="button" onClick={handleTest} disabled={testing} className="btn-md btn-secondary flex items-center gap-2">
             {testing && <Spinner size="sm" />} Test connection
@@ -195,128 +316,14 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         </div>
       </form>
 
-      {/* Harbor Companion */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Harbor Companion</h2>
-          {companionEnabled && (
-            <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected</span>
-          )}
-        </div>
+      <CompanionSection inst={inst} onRefresh={handleRefresh} />
 
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Install the Harbor Companion add-on in Home Assistant to enable backup management, updates,
-          add-on control, and host reboot/shutdown from Harbor. Harbor connects to the companion
-          directly using a URL and shared secret.
-        </p>
-
-        {companionEnabled ? (
-          <div className="card p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 min-w-0">
-              <Link size={14} className="shrink-0" />
-              <span className="truncate">{inst.companion_url || 'Connected'}</span>
-            </div>
-            <button
-              onClick={() => setRemoveCompanionConfirm(true)}
-              className="btn-sm btn-danger flex items-center gap-1.5 shrink-0"
-            >
-              <Unplug size={12} /> Disable
-            </button>
-          </div>
-        ) : setupInfo ? (
-          <div className="card p-4 space-y-4">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Configure the Harbor Companion add-on in Home Assistant with these values:
-            </p>
-            <div className="space-y-3">
-              {[
-                { label: 'Harbor URL', value: harborOrigin },
-                { label: 'Instance ID', value: String(inst.id) },
-                { label: 'Registration Secret', value: setupInfo.registration_secret },
-              ].map(({ label, value }) => (
-                <div key={label}>
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{label}</p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1.5 rounded border border-gray-200 dark:border-gray-700 truncate select-all">
-                      {value}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(value)}
-                      className="btn-sm btn-secondary flex items-center gap-1"
-                    >
-                      <Copy size={11} /> Copy
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <ol className="text-xs text-gray-500 dark:text-gray-400 space-y-1 list-decimal list-inside">
-              <li>Install the Harbor Companion add-on from your Home Assistant add-on store</li>
-              <li>Open the add-on <strong>Configuration</strong> tab and enter the three values above</li>
-              <li>Start the add-on — it will register with Harbor automatically</li>
-            </ol>
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={handleCheckStatus}
-                disabled={checkingStatus}
-                className="btn-sm btn-primary flex items-center gap-2"
-              >
-                {checkingStatus && <Spinner size="sm" />} Check status
-              </button>
-              <button
-                type="button"
-                onClick={() => { setSetupInfo(null); setCheckStatusMsg(''); }}
-                className="btn-sm btn-ghost"
-              >
-                Cancel
-              </button>
-              {checkStatusMsg && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">{checkStatusMsg}</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="card p-4 space-y-3">
-            <div>
-              <label className="label">Companion URL</label>
-              <input
-                className="input"
-                placeholder="https://havm-beta-companion.example.com"
-                value={companionUrl}
-                onChange={e => setCompanionUrl(e.target.value)}
-              />
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                The direct URL Harbor will use to reach the Companion add-on.
-              </p>
-            </div>
-            {companionError && <p className="text-sm text-red-600 dark:text-red-400">{companionError}</p>}
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleEnableCompanion}
-                disabled={companionEnabling || !companionUrl.trim()}
-                className="btn-md btn-primary flex items-center gap-2"
-              >
-                {companionEnabling && <Spinner size="sm" />}
-                <PlugZap size={14} /> Enable Companion
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Danger zone */}
       <div className="border border-red-200 dark:border-red-900 rounded-xl p-4">
         <h2 className="text-sm font-semibold text-red-700 dark:text-red-400 mb-1">Danger zone</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
           Removing this instance will delete all cached entity data and disconnect Harbor from it permanently.
         </p>
-        <button
-          onClick={() => setDeleteConfirm(true)}
-          className="btn-md btn-danger flex items-center gap-2"
-        >
+        <button onClick={() => setDeleteConfirm(true)} className="btn-md btn-danger flex items-center gap-2">
           <Trash2 size={14} /> Remove instance
         </button>
       </div>
@@ -330,17 +337,6 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         onConfirm={handleDelete}
       >
         Remove <strong>{inst.name}</strong> from Harbor? This deletes all cached data for this instance. The Home Assistant installation itself is not affected.
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={removeCompanionConfirm}
-        title="Disable companion"
-        confirmLabel="Disable"
-        danger
-        onClose={() => setRemoveCompanionConfirm(false)}
-        onConfirm={handleRemoveCompanion}
-      >
-        Disable the Harbor Companion for <strong>{inst.name}</strong>? Supervisor features will revert to the "Open in HA" placeholder. The add-on itself is not uninstalled.
       </ConfirmDialog>
     </div>
   );

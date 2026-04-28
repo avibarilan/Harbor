@@ -25,8 +25,8 @@ export default function InstanceActionButtons({ instance, disabled }) {
 
   const handleReboot = async () => {
     try {
-      await api.post(`/instances/${instance.id}/actions/reboot`);
-      toast('Host reboot triggered', 'success');
+      await api.post(`/instances/${instance.id}/companion/command`, { command: 'REBOOT_HOST' });
+      toast('Host reboot command sent — the instance will go offline momentarily', 'success');
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -35,8 +35,8 @@ export default function InstanceActionButtons({ instance, disabled }) {
 
   const handleShutdown = async () => {
     try {
-      await api.post(`/instances/${instance.id}/actions/shutdown`);
-      toast('Host shutdown triggered', 'success');
+      await api.post(`/instances/${instance.id}/companion/command`, { command: 'SHUTDOWN_HOST' });
+      toast('Host shutdown command sent', 'success');
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -78,35 +78,15 @@ export default function InstanceActionButtons({ instance, disabled }) {
         </>
       )}
 
-      <ConfirmDialog
-        open={restartConfirm}
-        title="Restart Home Assistant"
-        confirmLabel="Restart"
-        onClose={() => setRestartConfirm(false)}
-        onConfirm={handleRestart}
-      >
+      <ConfirmDialog open={restartConfirm} title="Restart Home Assistant" confirmLabel="Restart" onClose={() => setRestartConfirm(false)} onConfirm={handleRestart}>
         Restart Home Assistant Core on &ldquo;{instance.name}&rdquo;?
       </ConfirmDialog>
 
-      <ConfirmDialog
-        open={rebootConfirm}
-        title="Reboot host"
-        confirmLabel="Reboot"
-        danger
-        onClose={() => setRebootConfirm(false)}
-        onConfirm={handleReboot}
-      >
+      <ConfirmDialog open={rebootConfirm} title="Reboot host" confirmLabel="Reboot" danger onClose={() => setRebootConfirm(false)} onConfirm={handleReboot}>
         Reboot the host running &ldquo;{instance.name}&rdquo;? The system will be briefly unavailable.
       </ConfirmDialog>
 
-      <ConfirmDialog
-        open={shutdownConfirm}
-        title="Shutdown host"
-        confirmLabel="Shutdown"
-        danger
-        onClose={() => setShutdownConfirm(false)}
-        onConfirm={handleShutdown}
-      >
+      <ConfirmDialog open={shutdownConfirm} title="Shutdown host" confirmLabel="Shutdown" danger onClose={() => setShutdownConfirm(false)} onConfirm={handleShutdown}>
         Shut down the host running &ldquo;{instance.name}&rdquo;? You will need physical access to power it back on.
       </ConfirmDialog>
     </>

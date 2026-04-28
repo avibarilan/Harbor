@@ -9,7 +9,6 @@ export function getDb() {
   return db;
 }
 
-// Returns the ID of the hidden system site used for instances with no explicit location.
 export function getSystemSiteId() {
   const row = db.prepare("SELECT value FROM harbor_settings WHERE key = 'system_site_id'").get();
   if (row) return parseInt(row.value, 10);
@@ -88,12 +87,35 @@ export function initDb() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS companion_tokens (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id INTEGER NOT NULL,
+      token       TEXT NOT NULL UNIQUE,
+      expires_at  DATETIME NOT NULL,
+      used        INTEGER DEFAULT 0,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS companion_commands (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id  INTEGER NOT NULL,
+      command      TEXT NOT NULL,
+      payload      TEXT DEFAULT NULL,
+      status       TEXT DEFAULT 'pending',
+      result       TEXT DEFAULT NULL,
+      error        TEXT DEFAULT NULL,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME DEFAULT NULL,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
   `);
 
-  // Column migrations — each wrapped in try/catch (no IF NOT EXISTS for ADD/DROP COLUMN)
+  // Column migrations — each wrapped in try/catch (SQLite has no IF NOT EXISTS for ADD/DROP COLUMN)
   try { db.exec("ALTER TABLE instances ADD COLUMN cloudflare_proxied INTEGER DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_enabled INTEGER DEFAULT 0"); } catch {}
-  // v1.2→v1.3: dropped secret-based columns, added Ingress-based token
+  // v1.2→v1.3: ingress-based companion
   try { db.exec("ALTER TABLE instances DROP COLUMN companion_url"); } catch {}
   try { db.exec("ALTER TABLE instances DROP COLUMN companion_secret"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_ingress_token TEXT"); } catch {}
@@ -103,8 +125,14 @@ export function initDb() {
   try { db.exec("ALTER TABLE instances ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_url TEXT"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_secret TEXT"); } catch {}
-  // Reset any Ingress-based companions so they re-register with the new direct-URL mechanism
   try { db.exec("UPDATE instances SET companion_enabled = 0, companion_ingress_token = NULL, companion_secret = NULL, companion_url = NULL WHERE companion_ingress_token IS NOT NULL"); } catch {}
+  // v1.2.0: poll-based companion — companion_url and registration_secret no longer used
+  try { db.exec("ALTER TABLE instances DROP COLUMN companion_url"); } catch {}
+  try { db.exec("ALTER TABLE instances DROP COLUMN companion_registration_secret"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_last_seen DATETIME DEFAULT NULL"); } catch {}
+  try { db.exec("ALTER TABLE instances ADD COLUMN companion_version TEXT DEFAULT NULL"); } catch {}
+  // Force re-registration: companion must exchange a new setup token with the poll model
+  try { db.exec("UPDATE instances SET companion_enabled = 0, companion_secret = NULL, companion_last_seen = NULL, companion_version = NULL WHERE companion_enabled = 1"); } catch {}
 
   return db;
 }

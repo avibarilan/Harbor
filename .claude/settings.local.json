@@ -26,7 +26,11 @@
       "Bash(git rm *)",
       "Bash(git commit *)",
       "Bash(git update-index *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(gh api *)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git pull *)"
     ]
   }
 }

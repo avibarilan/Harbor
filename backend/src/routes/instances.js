@@ -30,9 +30,8 @@ function inferInstallationType(config) {
   return config.installation_type || 'unknown';
 }
 
-const INST_COLS = 'id, site_id, location_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_enabled, companion_url, created_at';
+const INST_COLS = 'id, site_id, location_id, name, url, installation_type, status, last_seen, ha_version, cloudflare_proxied, companion_enabled, companion_last_seen, companion_version, created_at';
 
-// Flat list of all instances (used by dashboard/sidebar)
 router.get('/', (req, res) => {
   const instances = getDb().prepare(`SELECT ${INST_COLS} FROM instances ORDER BY name`).all();
   res.json(instances);

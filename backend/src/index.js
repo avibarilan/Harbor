@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 
-import { initDb } from './db/index.js';
+import { initDb, getDb } from './db/index.js';
 import { initDefaultAdmin } from './db/seed.js';
 import { WebSocketManager } from './websocket/WebSocketManager.js';
 import { attachHarborWs } from './websocket/harborWs.js';
@@ -64,9 +64,29 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
+function scheduleCompanionCleanup() {
+  setInterval(() => {
+    try {
+      const db = getDb();
+      db.prepare(
+        "DELETE FROM companion_commands WHERE status IN ('done', 'error') AND created_at < datetime('now', '-1 hour')"
+      ).run();
+      db.prepare(
+        "UPDATE companion_commands SET status = 'pending' WHERE status = 'processing' AND created_at < datetime('now', '-2 minutes')"
+      ).run();
+    } catch (e) {
+      console.error('[companion-cleanup] error:', e.message);
+    }
+  }, 5 * 60 * 1000);
+}
+
 async function start() {
   initDb();
   await initDefaultAdmin();
+
+  if (!process.env.HARBOR_PUBLIC_URL) {
+    console.warn('[harbor] WARNING: HARBOR_PUBLIC_URL is not set. Companion setup tokens will not work.');
+  }
 
   const wsManager = new WebSocketManager();
   wsManager.start();
@@ -76,6 +96,7 @@ async function start() {
   httpServer.listen(PORT, () => {
     console.log(`Harbor running on http://localhost:${PORT}`);
     scheduleUpdateCheck();
+    scheduleCompanionCleanup();
   });
 }
 

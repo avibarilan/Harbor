@@ -12,6 +12,7 @@ services:
       - ENCRYPTION_KEY=H4rb0rEncryptK3y!!AviAdmin202626
       - PORT=3000
       - DATA_DIR=/data
+      - HARBOR_PUBLIC_URL=https://harbor.blackcoffeenetworks.com
     volumes:
       - /volume1/docker/Harbor/data:/data
       - /var/run/docker.sock:/var/run/docker.sock

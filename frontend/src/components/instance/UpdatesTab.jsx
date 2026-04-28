@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, RefreshCw, ArrowUp } from 'lucide-react';
-import { api } from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
 
@@ -15,15 +15,9 @@ function PlaceholderView({ inst }) {
         Manage updates in Home Assistant
       </h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">
-        Update management requires the Home Assistant Supervisor API. Install the Harbor Companion
-        add-on and configure it in Settings to manage updates from here.
+        Update management requires the Harbor Companion add-on. Install and configure it in Settings.
       </p>
-      <a
-        href={inst.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="btn-md btn-primary flex items-center gap-2"
-      >
+      <a href={inst.url} target="_blank" rel="noopener noreferrer" className="btn-md btn-primary flex items-center gap-2">
         <ExternalLink size={14} /> Open in Home Assistant
       </a>
     </div>
@@ -32,41 +26,26 @@ function PlaceholderView({ inst }) {
 
 function UpdateRow({ label, info, onUpdate, updating }) {
   const [confirm, setConfirm] = useState(false);
-
   if (!info) return null;
-
   return (
     <>
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 last:border-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{label}</span>
-            {info.update_available && (
-              <span className="badge badge-blue">Update available</span>
-            )}
+            {info.update_available && <span className="badge badge-blue">Update available</span>}
           </div>
           <p className="text-xs text-gray-400 font-mono mt-0.5">
-            {info.version}
-            {info.update_available && info.version_latest ? ` → ${info.version_latest}` : ''}
+            {info.version}{info.update_available && info.version_latest ? ` → ${info.version_latest}` : ''}
           </p>
         </div>
         {info.update_available && onUpdate && (
-          <button
-            onClick={() => setConfirm(true)}
-            disabled={updating}
-            className="btn-sm btn-primary flex items-center gap-1.5 shrink-0"
-          >
+          <button onClick={() => setConfirm(true)} disabled={updating} className="btn-sm btn-primary flex items-center gap-1.5 shrink-0">
             {updating ? <Spinner size="sm" /> : <ArrowUp size={12} />} Update
           </button>
         )}
       </div>
-      <ConfirmDialog
-        open={confirm}
-        title={`Update ${label}`}
-        confirmLabel="Update"
-        onClose={() => setConfirm(false)}
-        onConfirm={() => { setConfirm(false); onUpdate(); }}
-      >
+      <ConfirmDialog open={confirm} title={`Update ${label}`} confirmLabel="Update" onClose={() => setConfirm(false)} onConfirm={() => { setConfirm(false); onUpdate(); }}>
         Update <strong>{label}</strong> from {info.version} to {info.version_latest}? Home Assistant may restart during the update.
       </ConfirmDialog>
     </>
@@ -77,15 +56,17 @@ function FullUpdatesView({ inst }) {
   const { toast } = useToast();
   const [updates, setUpdates] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [updating, setUpdating] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const data = await api.get(`/instances/${inst.id}/updates`);
-      setUpdates(data.supervisor_unavailable ? null : data);
+      const data = await runCompanionCommand(inst.id, 'GET_UPDATES');
+      setUpdates(data);
     } catch (e) {
-      toast(e.message, 'error');
+      setError(e.message);
     } finally {
       setLoading(false);
     }
@@ -93,16 +74,13 @@ function FullUpdatesView({ inst }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const doUpdate = async (key, addonSlug) => {
+  const doUpdate = async (command, key, addonSlug) => {
     const k = addonSlug || key;
     setUpdating(u => ({ ...u, [k]: true }));
     try {
-      const path = addonSlug
-        ? `/instances/${inst.id}/updates/addon/${addonSlug}`
-        : `/instances/${inst.id}/updates/${key}`;
-      await api.post(path);
+      await runCompanionCommand(inst.id, command, addonSlug ? { addon_slug: addonSlug } : undefined);
       toast(`${key} update triggered`, 'success');
-      setTimeout(load, 5000);
+      setTimeout(load, 8000);
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -119,14 +97,16 @@ function FullUpdatesView({ inst }) {
         <button onClick={load} className="btn-ghost btn-sm" title="Refresh"><RefreshCw size={14} /></button>
       </div>
 
-      {!updates ? (
+      {error ? (
+        <div className="card p-8 text-center text-sm text-red-500 dark:text-red-400">{error}</div>
+      ) : !updates ? (
         <div className="card p-8 text-center text-sm text-gray-400">Could not load update information</div>
       ) : (
         <div className="space-y-4">
           <div className="card overflow-hidden">
-            <UpdateRow label="Core" info={updates.core} onUpdate={() => doUpdate('core')} updating={updating.core} />
-            <UpdateRow label="Supervisor" info={updates.supervisor} onUpdate={() => doUpdate('supervisor')} updating={updating.supervisor} />
-            <UpdateRow label="OS" info={updates.os} onUpdate={() => doUpdate('os')} updating={updating.os} />
+            <UpdateRow label="Core" info={updates.core} onUpdate={() => doUpdate('UPDATE_CORE', 'core')} updating={updating.core} />
+            <UpdateRow label="Supervisor" info={updates.supervisor} onUpdate={() => doUpdate('UPDATE_SUPERVISOR', 'supervisor')} updating={updating.supervisor} />
+            <UpdateRow label="OS" info={updates.os} onUpdate={() => doUpdate('UPDATE_OS', 'os')} updating={updating.os} />
           </div>
 
           {updates.addons && updates.addons.length > 0 && (
@@ -138,7 +118,7 @@ function FullUpdatesView({ inst }) {
                     key={addon.slug}
                     label={addon.name}
                     info={{ version: addon.version, version_latest: addon.version_latest, update_available: true }}
-                    onUpdate={() => doUpdate('addon', addon.slug)}
+                    onUpdate={() => doUpdate('UPDATE_ADDON', addon.name, addon.slug)}
                     updating={updating[addon.slug]}
                   />
                 ))}

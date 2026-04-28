@@ -55,37 +55,6 @@ export async function haDelete(inst, path) {
   return res.json().catch(() => ({}));
 }
 
-export async function callCompanion(inst, path, method = 'GET', body = undefined) {
-  if (!inst.companion_enabled || !inst.companion_url || !inst.companion_secret) {
-    throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
-  }
-  const url = inst.companion_url.replace(/\/$/, '') + path;
-  const opts = {
-    method,
-    headers: { 'X-Harbor-Secret': inst.companion_secret, 'Content-Type': 'application/json' },
-  };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-
-  const res = await fetch(url, opts);
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw Object.assign(new Error(`Companion error ${res.status}: ${text}`), { status: res.status });
-  }
-  return res.json().catch(() => ({}));
-}
-
-export async function streamCompanion(inst, path) {
-  if (!inst.companion_enabled || !inst.companion_url || !inst.companion_secret) {
-    throw Object.assign(new Error('Companion not configured for this instance'), { status: 503 });
-  }
-  const url = inst.companion_url.replace(/\/$/, '') + path;
-  const res = await fetch(url, { headers: { 'X-Harbor-Secret': inst.companion_secret } });
-  if (!res.ok) {
-    throw Object.assign(new Error(`Companion stream error ${res.status}`), { status: res.status });
-  }
-  return res;
-}
-
 export function callHaWs(inst, message) {
   return new Promise((resolve, reject) => {
     const token = getToken(inst);

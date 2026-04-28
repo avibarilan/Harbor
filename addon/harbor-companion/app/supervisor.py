@@ -86,6 +86,11 @@ async def create_backup() -> dict:
     return data.get("data", {})
 
 
+async def create_backup_named(name: str) -> dict:
+    data = await _post("/backups/new/full", {"name": name})
+    return data.get("data", {})
+
+
 async def restore_backup(slug: str) -> dict:
     data = await _post(f"/backups/{slug}/restore/full")
     return data.get("data", {})

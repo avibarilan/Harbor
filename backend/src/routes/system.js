@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { getInstance, haGet, haPost, callCompanion } from '../utils/haApi.js';
+import { getInstance, haGet, haPost } from '../utils/haApi.js';
 import { logAudit } from '../utils/audit.js';
 
 const router = Router();
@@ -25,57 +25,11 @@ router.get('/:id/sysconfig', async (req, res) => {
   }
 });
 
-router.get('/:id/logs', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
-  try {
-    const data = await callCompanion(inst, '/logs');
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
-router.get('/:id/sysinfo', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
-  try {
-    const data = await callCompanion(inst, '/info');
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
 router.post('/:id/actions/restart', async (req, res) => {
   const inst = getInstance(req.params.id);
   try {
     await haPost(inst, '/api/services/homeassistant/restart');
     logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'core_restarted', details: 'Home Assistant Core restarted' });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
-router.post('/:id/actions/reboot', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
-  try {
-    await callCompanion(inst, '/reboot', 'POST');
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'host_rebooted', details: 'Host reboot triggered via Companion' });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message });
-  }
-});
-
-router.post('/:id/actions/shutdown', async (req, res) => {
-  const inst = getInstance(req.params.id);
-  if (!inst.companion_enabled) return res.status(503).json({ error: 'Companion not configured' });
-  try {
-    await callCompanion(inst, '/shutdown', 'POST');
-    logAudit({ instanceId: inst.id, siteId: inst.site_id, action: 'host_shutdown', details: 'Host shutdown triggered via Companion' });
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });

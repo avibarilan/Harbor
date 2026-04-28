@@ -1,87 +1,227 @@
 import asyncio
+import base64
 import json
 import logging
+import os
+from contextlib import asynccontextmanager
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI
+
 import supervisor as sup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.1.1"
+VERSION = "1.2.0"
+OPTIONS_FILE = "/data/options.json"
+CONFIG_FILE = "/data/companion_config.json"
 
-app = FastAPI(title="Harbor Companion", version=VERSION)
-
-
-class StripPrefixMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        path = request.scope["path"]
-        if path.startswith("/companion"):
-            request.scope["path"] = path[len("/companion"):] or "/"
-            request.scope["raw_path"] = request.scope["path"].encode()
-        log.info(f"Request: {request.method} {request.scope['path']}")
-        return await call_next(request)
+harbor_url = ""
+instance_id = None
+secret = ""
+poll_interval_seconds = 10
 
 
-app.add_middleware(StripPrefixMiddleware)
+def _decode_token(token: str) -> dict:
+    padding = 4 - len(token) % 4
+    if padding != 4:
+        token += "=" * padding
+    return json.loads(base64.b64decode(token).decode("utf-8"))
 
 
-async def _register_with_harbor():
-    """POST registration details to Harbor so it can reach this companion directly."""
+async def load_config() -> bool:
+    global harbor_url, instance_id, secret
+
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                cfg = json.load(f)
+            harbor_url = cfg["harbor_url"]
+            instance_id = cfg["instance_id"]
+            secret = cfg["secret"]
+            log.info(f"Loaded saved config — connecting to {harbor_url} as instance {instance_id}")
+            return True
+        except Exception as e:
+            log.warning(f"Could not read companion_config.json: {e}")
+
     try:
-        with open("/data/options.json") as f:
+        with open(OPTIONS_FILE) as f:
             opts = json.load(f)
     except Exception as e:
-        log.warning(f"Could not read options.json: {e} — skipping Harbor registration")
+        log.error(f"Could not read options.json: {e}")
+        return False
+
+    token = opts.get("harbor_token", "").strip()
+    if not token:
+        log.error("harbor_token is empty in add-on options. Generate a setup token in Harbor → Instance Settings.")
+        return False
+
+    try:
+        payload = _decode_token(token)
+        harbor_url = payload["harbor_url"]
+        instance_id = payload["instance_id"]
+        secret = payload["secret"]
+        log.info(f"Token decoded — will connect to {harbor_url} as instance {instance_id}")
+        return True
+    except Exception as e:
+        log.error(f"Invalid harbor_token format: {e}")
+        return False
+
+
+async def register():
+    global poll_interval_seconds
+
+    if os.path.exists(CONFIG_FILE):
+        log.info("Already registered (companion_config.json exists) — skipping registration")
         return
 
-    harbor_url = opts.get("harbor_url", "").strip().rstrip("/")
-    instance_id = str(opts.get("instance_id", "")).strip()
-    harbor_secret = opts.get("harbor_secret", "").strip()
-    companion_url = opts.get("companion_url", "").strip().rstrip("/")
-
-    if not harbor_url or not instance_id or not harbor_secret:
-        log.info("Harbor registration not configured in add-on options — skipping")
+    try:
+        with open(OPTIONS_FILE) as f:
+            opts = json.load(f)
+    except Exception as e:
+        log.warning(f"Could not read options.json for registration: {e}")
         return
 
-    if not companion_url:
-        log.warning("companion_url is empty in add-on options — skipping registration (set it to the public URL of this companion, e.g. https://example.com/companion)")
+    token = opts.get("harbor_token", "").strip()
+    if not token:
         return
 
-    log.info(f"Registering with Harbor at {harbor_url} (instance {instance_id})")
-    log.info(f"companion_url being sent: '{companion_url}'")
+    log.info(f"Registering with Harbor at {harbor_url}")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(
+                f"{harbor_url}/api/companion/register",
+                json={"setup_token": token, "companion_version": VERSION},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            poll_interval_seconds = data.get("poll_interval_seconds", 10)
+            log.info(f"Registered successfully. Poll interval: {poll_interval_seconds}s")
+            with open(CONFIG_FILE, "w") as f:
+                json.dump({"harbor_url": harbor_url, "instance_id": instance_id, "secret": secret}, f)
+        elif r.status_code == 401:
+            log.warning("Token already used or expired — companion may already be registered")
+        else:
+            log.warning(f"Registration failed {r.status_code}: {r.text}")
+    except Exception as e:
+        log.warning(f"Registration error: {e}")
 
-    payload = {"instance_id": instance_id, "secret": harbor_secret, "companion_url": companion_url}
+
+async def execute_command(command_id: int, command: str, payload: dict | None):
+    result = None
+    error = None
+    status = "done"
+
+    try:
+        if command == "GET_UPDATES":
+            result = await sup.get_updates()
+        elif command == "GET_ADDONS":
+            result = await sup.list_addons()
+        elif command == "GET_BACKUPS":
+            result = await sup.list_backups()
+        elif command == "GET_SYSTEM":
+            result = await sup.get_info()
+        elif command == "REBOOT_HOST":
+            result = await sup.reboot_host()
+        elif command == "RESTART_HA":
+            result = await sup.restart_core()
+        elif command == "SHUTDOWN_HOST":
+            result = await sup.shutdown_host()
+        elif command == "UPDATE_CORE":
+            result = await sup.update_core()
+        elif command == "UPDATE_SUPERVISOR":
+            result = await sup.update_supervisor()
+        elif command == "UPDATE_OS":
+            result = await sup.update_os()
+        elif command == "UPDATE_ADDON":
+            slug = (payload or {}).get("addon_slug")
+            if not slug:
+                raise ValueError("UPDATE_ADDON requires addon_slug in payload")
+            result = await sup.update_addon(slug)
+        elif command == "BACKUP_NOW":
+            name = (payload or {}).get("name", "harbor-backup")
+            result = await sup.create_backup_named(name)
+        else:
+            error = f"Unknown command: {command}"
+            status = "error"
+    except Exception as e:
+        log.error(f"Command {command} failed: {e}")
+        error = str(e)
+        status = "error"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(f"{harbor_url}/api/companion/register", json=payload)
-        if r.is_success:
-            log.info(f"Registered with Harbor successfully (companion_url={companion_url or 'not set'})")
-        else:
-            log.warning(f"Harbor registration failed {r.status_code}: {r.text}")
+            await client.post(
+                f"{harbor_url}/api/companion/result/{command_id}",
+                headers={"X-Harbor-Secret": secret},
+                json={"instance_id": instance_id, "status": status, "result": result, "error": error},
+            )
     except Exception as e:
-        log.warning(f"Harbor registration error: {e}")
+        log.warning(f"Failed to post result for command {command_id}: {e}")
 
 
-@app.on_event("startup")
-async def startup():
+async def check_for_updates():
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get("https://api.github.com/repos/avibarilan/Harbor/releases/latest")
+        if r.status_code == 200:
+            latest = r.json().get("tag_name", "").lstrip("v")
+            if latest and latest > VERSION:
+                log.info(f"Harbor Companion update available: v{latest}. Update via Home Assistant add-on store.")
+    except Exception:
+        pass
+
+
+async def poll_loop():
+    last_update_check = 0.0
+    update_check_interval = 6 * 3600
+
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(
+                    f"{harbor_url}/api/companion/poll/{instance_id}",
+                    headers={"X-Harbor-Secret": secret, "X-Companion-Version": VERSION},
+                )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("command_id"):
+                    asyncio.create_task(
+                        execute_command(data["command_id"], data["command"], data.get("payload"))
+                    )
+            elif r.status_code == 401:
+                log.error("Auth rejected by Harbor — secret mismatch. Re-generate a setup token.")
+        except Exception as e:
+            log.warning(f"Poll failed: {e}")
+
+        now = asyncio.get_event_loop().time()
+        if now - last_update_check > update_check_interval:
+            last_update_check = now
+            asyncio.create_task(check_for_updates())
+
+        await asyncio.sleep(poll_interval_seconds)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     log.info("=" * 60)
-    log.info("Harbor Companion started - accessible via Home Assistant Ingress")
+    log.info(f"Harbor Companion v{VERSION} starting")
     log.info(f"SUPERVISOR_TOKEN length: {len(sup.SUPERVISOR_TOKEN)} chars")
     log.info("=" * 60)
-    asyncio.create_task(_register_with_harbor())
+
+    ok = await load_config()
+    if ok:
+        await register()
+        asyncio.create_task(poll_loop())
+    else:
+        log.error("Companion not configured — running in limited mode (health endpoint only)")
+    yield
 
 
-def _sup_error(e: sup.SupervisorError):
-    raise HTTPException(status_code=e.status, detail=str(e))
+app = FastAPI(title="Harbor Companion", version=VERSION, lifespan=lifespan)
 
-
-# ── Health ──────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
@@ -90,169 +230,6 @@ async def health():
     except Exception:
         ha_version = "unknown"
     return {"status": "ok", "version": VERSION, "ha_version": ha_version}
-
-
-# ── System info & actions ────────────────────────────────────────────────────
-
-@app.get("/info")
-async def info():
-    try:
-        return await sup.get_info()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.get("/logs")
-async def logs():
-    try:
-        text = await sup.get_logs()
-        return {"logs": text}
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/restart")
-async def restart():
-    try:
-        return await sup.restart_core()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/reboot")
-async def reboot():
-    try:
-        return await sup.reboot_host()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/shutdown")
-async def shutdown():
-    try:
-        return await sup.shutdown_host()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-# ── Backups ──────────────────────────────────────────────────────────────────
-
-@app.get("/backups")
-async def list_backups():
-    try:
-        return await sup.list_backups()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/backups/new")
-async def create_backup():
-    try:
-        return await sup.create_backup()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.get("/backups/{slug}/info")
-async def backup_info(slug: str):
-    try:
-        return await sup.get_backup_info(slug)
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/backups/{slug}/restore")
-async def restore_backup(slug: str):
-    try:
-        return await sup.restore_backup(slug)
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.get("/backups/{slug}/download")
-async def download_backup(slug: str):
-    try:
-        response, client = await sup.download_backup_stream(slug)
-        if not response.is_success:
-            await response.aclose()
-            await client.aclose()
-            raise HTTPException(status_code=response.status_code, detail="Backup download failed")
-
-        async def stream():
-            try:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-            finally:
-                await response.aclose()
-                await client.aclose()
-
-        return StreamingResponse(
-            stream(),
-            media_type="application/tar+gzip",
-            headers={"Content-Disposition": f'attachment; filename="{slug}.tar.gz"'},
-        )
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-# ── Updates ──────────────────────────────────────────────────────────────────
-
-@app.get("/updates")
-async def get_updates():
-    try:
-        return await sup.get_updates()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/updates/core")
-async def update_core():
-    try:
-        return await sup.update_core()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/updates/supervisor")
-async def update_supervisor():
-    try:
-        return await sup.update_supervisor()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/updates/os")
-async def update_os():
-    try:
-        return await sup.update_os()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/updates/addon/{slug}")
-async def update_addon(slug: str):
-    try:
-        return await sup.update_addon(slug)
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-# ── Add-ons ──────────────────────────────────────────────────────────────────
-
-@app.get("/addons")
-async def list_addons():
-    try:
-        return await sup.list_addons()
-    except sup.SupervisorError as e:
-        _sup_error(e)
-
-
-@app.post("/addons/{slug}/restart")
-async def restart_addon(slug: str):
-    try:
-        return await sup.restart_addon(slug)
-    except sup.SupervisorError as e:
-        _sup_error(e)
 
 
 if __name__ == "__main__":
