@@ -14,14 +14,11 @@ export const companionPublicRouter = Router();
 companionPublicRouter.post('/token/:instanceId', requireAuth, (req, res) => {
   const db = getDb();
 
-  // Resolve harbor URL: DB override > env var > auto-detect from request headers
+  // Resolve harbor URL: DB override > auto-detect from request Host header
   let harborPublicUrl = '';
   const overrideRow = db.prepare("SELECT value FROM harbor_settings WHERE key = 'harbor_public_url'").get();
   if (overrideRow?.value) {
     try { harborPublicUrl = JSON.parse(overrideRow.value); } catch { harborPublicUrl = overrideRow.value; }
-  }
-  if (!harborPublicUrl && process.env.HARBOR_PUBLIC_URL) {
-    harborPublicUrl = process.env.HARBOR_PUBLIC_URL;
   }
   if (!harborPublicUrl) {
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';

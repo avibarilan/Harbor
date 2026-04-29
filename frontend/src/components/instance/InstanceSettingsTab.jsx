@@ -25,7 +25,7 @@ function CompanionSection({ inst, onRefresh }) {
   const [disableConfirm, setDisableConfirm] = useState(false);
   const [disabling, setDisabling] = useState(false);
 
-  const needsReconfig = inst.companion_enabled && !inst.companion_last_seen;
+  const needsReconfig = !!inst.companion_enabled && !inst.companion_last_seen;
 
   useEffect(() => {
     if (!inst.companion_enabled) { setStatus(null); return; }

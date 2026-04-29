@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, RefreshCw, ArrowUp } from 'lucide-react';
+import { ExternalLink, RefreshCw, ArrowUp, CheckCircle } from 'lucide-react';
 import { useToast } from '../../context/ToastContext.jsx';
 import { api } from '../../api/client.js';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
@@ -76,15 +76,30 @@ function FullUpdatesView({ inst }) {
       api.get(`/instances/${inst.id}/entities?domain=update`),
     ]);
 
-    if (companionRes.status === 'fulfilled') {
-      setUpdates(companionRes.value);
+    const companionData = companionRes.status === 'fulfilled' ? companionRes.value : null;
+
+    if (companionData) {
+      setUpdates(companionData);
     } else {
       setError(companionRes.reason?.message || 'Failed to load updates');
     }
 
     if (entitiesRes.status === 'fulfilled') {
+      // Build exclusion sets from companion addon data to prevent add-ons
+      // from appearing in both "Add-on Updates" and "HACS / Custom Integrations"
+      const addonList = companionData?.addons || [];
+      const addonNameSet = new Set(addonList.map(a => a.name.toLowerCase()));
+      const addonSlugEntityIds = new Set(
+        addonList.map(a => `update.${a.slug.replace(/-/g, '_').toLowerCase()}_update`)
+      );
+
       setIntegrationUpdates(
-        entitiesRes.value.filter(e => e.state === 'on' && !BUILTIN_UPDATE_IDS.has(e.entity_id))
+        entitiesRes.value.filter(e => {
+          if (e.state !== 'on') return false;
+          if (BUILTIN_UPDATE_IDS.has(e.entity_id)) return false;
+          const title = (e.attributes?.title || '').toLowerCase();
+          return !addonNameSet.has(title) && !addonSlugEntityIds.has(e.entity_id);
+        })
       );
     }
 
@@ -152,6 +167,12 @@ function FullUpdatesView({ inst }) {
             <UpdateRow label="OS" info={updates.os} onUpdate={() => doUpdate('UPDATE_OS', 'os')} updating={updating.os} />
           </div>
 
+          {allUpToDate && (
+            <div className="card p-4 text-center text-sm text-green-600 dark:text-green-400 flex items-center justify-center gap-2">
+              <CheckCircle size={14} /> Everything is up to date
+            </div>
+          )}
+
           {updates.addons && updates.addons.length > 0 && (
             <>
               <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Add-on updates</h3>
@@ -188,10 +209,6 @@ function FullUpdatesView({ inst }) {
                 ))}
               </div>
             </>
-          )}
-
-          {allUpToDate && (
-            <div className="card p-8 text-center text-sm text-green-600 dark:text-green-400">Everything is up to date</div>
           )}
         </div>
       )}
