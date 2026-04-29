@@ -84,10 +84,6 @@ async function start() {
   initDb();
   await initDefaultAdmin();
 
-  if (!process.env.HARBOR_PUBLIC_URL) {
-    console.warn('[harbor] WARNING: HARBOR_PUBLIC_URL is not set. Companion setup tokens will not work.');
-  }
-
   const wsManager = new WebSocketManager();
   wsManager.start();
 

@@ -39,6 +39,14 @@ async def _post(path: str, body: dict | None = None):
         return r.json()
 
 
+async def _delete(path: str):
+    async with _client() as c:
+        r = await c.delete(path)
+        if not r.is_success:
+            raise SupervisorError(f"Supervisor {r.status_code}: {r.text}", r.status_code)
+        return r.json()
+
+
 async def get_info() -> dict:
     core = await _get("/core/info")
     sup = await _get("/supervisor/info")
@@ -89,6 +97,10 @@ async def create_backup() -> dict:
 async def create_backup_named(name: str) -> dict:
     data = await _post("/backups/new/full", {"name": name})
     return data.get("data", {})
+
+
+async def delete_backup(slug: str) -> dict:
+    return await _delete(f"/backups/{slug}")
 
 
 async def restore_backup(slug: str) -> dict:

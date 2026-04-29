@@ -12,12 +12,25 @@ export const companionPublicRouter = Router();
 
 // Generate setup token — JWT-authenticated, called by Harbor frontend
 companionPublicRouter.post('/token/:instanceId', requireAuth, (req, res) => {
-  const harborPublicUrl = process.env.HARBOR_PUBLIC_URL || '';
-  if (!harborPublicUrl) {
-    return res.status(500).json({ error: 'HARBOR_PUBLIC_URL is not configured on the server' });
-  }
-
   const db = getDb();
+
+  // Resolve harbor URL: DB override > env var > auto-detect from request headers
+  let harborPublicUrl = '';
+  const overrideRow = db.prepare("SELECT value FROM harbor_settings WHERE key = 'harbor_public_url'").get();
+  if (overrideRow?.value) {
+    try { harborPublicUrl = JSON.parse(overrideRow.value); } catch { harborPublicUrl = overrideRow.value; }
+  }
+  if (!harborPublicUrl && process.env.HARBOR_PUBLIC_URL) {
+    harborPublicUrl = process.env.HARBOR_PUBLIC_URL;
+  }
+  if (!harborPublicUrl) {
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
+    if (host) harborPublicUrl = `${proto}://${host}`;
+  }
+  if (!harborPublicUrl) {
+    return res.status(500).json({ error: 'Cannot determine Harbor URL. Set it in Settings → General.' });
+  }
   const inst = db.prepare('SELECT id, site_id FROM instances WHERE id = ?').get(req.params.instanceId);
   if (!inst) return res.status(404).json({ error: 'Instance not found' });
 

@@ -143,6 +143,11 @@ async def execute_command(command_id: int, command: str, payload: dict | None):
         elif command == "BACKUP_NOW":
             name = (payload or {}).get("name", "harbor-backup")
             result = await sup.create_backup_named(name)
+        elif command == "DELETE_BACKUP":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("DELETE_BACKUP requires slug in payload")
+            result = await sup.delete_backup(slug)
         else:
             error = f"Unknown command: {command}"
             status = "error"

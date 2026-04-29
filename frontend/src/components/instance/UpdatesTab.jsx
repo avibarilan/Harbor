@@ -1,9 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, RefreshCw, ArrowUp } from 'lucide-react';
 import { useToast } from '../../context/ToastContext.jsx';
+import { api } from '../../api/client.js';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
+
+const BUILTIN_UPDATE_IDS = new Set([
+  'update.home_assistant_core_update',
+  'update.home_assistant_supervisor_update',
+  'update.home_assistant_operating_system_update',
+]);
 
 function PlaceholderView({ inst }) {
   return (
@@ -46,7 +53,7 @@ function UpdateRow({ label, info, onUpdate, updating }) {
         )}
       </div>
       <ConfirmDialog open={confirm} title={`Update ${label}`} confirmLabel="Update" onClose={() => setConfirm(false)} onConfirm={() => { setConfirm(false); onUpdate(); }}>
-        Update <strong>{label}</strong> from {info.version} to {info.version_latest}? Home Assistant may restart during the update.
+        Update <strong>{label}</strong>{info.version_latest ? ` to ${info.version_latest}` : ''}? Home Assistant may restart during the update.
       </ConfirmDialog>
     </>
   );
@@ -55,6 +62,7 @@ function UpdateRow({ label, info, onUpdate, updating }) {
 function FullUpdatesView({ inst }) {
   const { toast } = useToast();
   const [updates, setUpdates] = useState(null);
+  const [integrationUpdates, setIntegrationUpdates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updating, setUpdating] = useState({});
@@ -62,14 +70,25 @@ function FullUpdatesView({ inst }) {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const data = await runCompanionCommand(inst.id, 'GET_UPDATES');
-      setUpdates(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+
+    const [companionRes, entitiesRes] = await Promise.allSettled([
+      runCompanionCommand(inst.id, 'GET_UPDATES'),
+      api.get(`/instances/${inst.id}/entities?domain=update`),
+    ]);
+
+    if (companionRes.status === 'fulfilled') {
+      setUpdates(companionRes.value);
+    } else {
+      setError(companionRes.reason?.message || 'Failed to load updates');
     }
+
+    if (entitiesRes.status === 'fulfilled') {
+      setIntegrationUpdates(
+        entitiesRes.value.filter(e => e.state === 'on' && !BUILTIN_UPDATE_IDS.has(e.entity_id))
+      );
+    }
+
+    setLoading(false);
   }, [inst.id]);
 
   useEffect(() => { load(); }, [load]);
@@ -88,7 +107,31 @@ function FullUpdatesView({ inst }) {
     }
   };
 
+  const doIntegrationUpdate = async (entity) => {
+    const key = entity.entity_id;
+    setUpdating(u => ({ ...u, [key]: true }));
+    try {
+      await api.post(`/instances/${inst.id}/entities/call`, {
+        entity_id: entity.entity_id,
+        service: 'install',
+      });
+      toast(`Update started for ${entity.attributes?.title || entity.attributes?.friendly_name || entity.entity_id}`, 'success');
+      setTimeout(load, 8000);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setUpdating(u => ({ ...u, [key]: false }));
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-48"><Spinner size="lg" /></div>;
+
+  const allUpToDate = updates
+    && !updates.core?.update_available
+    && !updates.supervisor?.update_available
+    && !updates.os?.update_available
+    && (!updates.addons || updates.addons.length === 0)
+    && integrationUpdates.length === 0;
 
   return (
     <div className="p-6 max-w-2xl">
@@ -126,7 +169,28 @@ function FullUpdatesView({ inst }) {
             </>
           )}
 
-          {!updates.core?.update_available && !updates.supervisor?.update_available && !updates.os?.update_available && (!updates.addons || updates.addons.length === 0) && (
+          {integrationUpdates.length > 0 && (
+            <>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">HACS / Custom integrations</h3>
+              <div className="card overflow-hidden">
+                {integrationUpdates.map(entity => (
+                  <UpdateRow
+                    key={entity.entity_id}
+                    label={entity.attributes?.title || entity.attributes?.friendly_name || entity.entity_id}
+                    info={{
+                      version: entity.attributes?.installed_version,
+                      version_latest: entity.attributes?.latest_version,
+                      update_available: true,
+                    }}
+                    onUpdate={() => doIntegrationUpdate(entity)}
+                    updating={updating[entity.entity_id]}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {allUpToDate && (
             <div className="card p-8 text-center text-sm text-green-600 dark:text-green-400">Everything is up to date</div>
           )}
         </div>

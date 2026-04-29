@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, HardDrive, Plus, RefreshCw } from 'lucide-react';
+import { ExternalLink, HardDrive, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext.jsx';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
 import Spinner from '../ui/Spinner.jsx';
+import ConfirmDialog from '../ui/ConfirmDialog.jsx';
 
 function PlaceholderView({ inst }) {
   return (
@@ -29,6 +30,8 @@ function FullBackupsView({ inst }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleting, setDeleting] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +59,20 @@ function FullBackupsView({ inst }) {
       toast(e.message, 'error');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async (slug) => {
+    setDeleting(d => ({ ...d, [slug]: true }));
+    try {
+      await runCompanionCommand(inst.id, 'DELETE_BACKUP', { slug });
+      toast('Backup deleted', 'success');
+      setBackups(prev => prev.filter(b => b.slug !== slug));
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setDeleting(d => ({ ...d, [slug]: false }));
+      setDeleteConfirm(null);
     }
   };
 
@@ -89,10 +106,31 @@ function FullBackupsView({ inst }) {
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{b.name || b.slug}</p>
                   <p className="text-xs text-gray-400">{date}{sizeMb ? ` · ${sizeMb}` : ''}</p>
                 </div>
+                <button
+                  onClick={() => setDeleteConfirm(b)}
+                  disabled={deleting[b.slug]}
+                  className="btn-ghost btn-sm text-gray-400 hover:text-red-600 dark:hover:text-red-400 shrink-0"
+                  title="Delete backup"
+                >
+                  {deleting[b.slug] ? <Spinner size="sm" /> : <Trash2 size={14} />}
+                </button>
               </div>
             );
           })}
         </div>
+      )}
+
+      {deleteConfirm && (
+        <ConfirmDialog
+          open
+          title="Delete backup"
+          confirmLabel="Delete"
+          danger
+          onClose={() => setDeleteConfirm(null)}
+          onConfirm={() => handleDelete(deleteConfirm.slug)}
+        >
+          Delete backup <strong>{deleteConfirm.name || deleteConfirm.slug}</strong>? This cannot be undone.
+        </ConfirmDialog>
       )}
     </div>
   );

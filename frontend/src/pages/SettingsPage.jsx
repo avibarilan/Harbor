@@ -5,7 +5,67 @@ import { useSites } from '../context/SitesContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
-import { Settings, KeyRound, Download, RefreshCw, CheckCircle, AlertCircle, ExternalLink, MapPin, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Settings, KeyRound, Download, RefreshCw, CheckCircle, AlertCircle, ExternalLink, MapPin, Plus, Pencil, Trash2, X, Globe } from 'lucide-react';
+
+function GeneralSection() {
+  const { toast } = useToast();
+  const [publicUrl, setPublicUrl] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get('/settings').then(s => {
+      setPublicUrl(s.harbor_public_url || '');
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.put('/settings', { harbor_public_url: publicUrl.trim() || null });
+      toast('Settings saved', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="card p-5 max-w-md">
+      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2">
+        <Globe size={15} className="text-harbor-500" /> General
+      </h2>
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label className="label">
+            Harbor Public URL
+            <span className="text-gray-400 font-normal ml-1">(optional override)</span>
+          </label>
+          <input
+            className="input"
+            type="url"
+            placeholder="https://harbor.example.com"
+            value={publicUrl}
+            onChange={e => setPublicUrl(e.target.value)}
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Used when generating Companion setup tokens. Leave blank to auto-detect from the incoming request.
+          </p>
+        </div>
+        <div className="flex justify-end">
+          <button type="submit" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
+            {saving && <Spinner size="sm" />} Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 function ChangePasswordForm() {
   const { toast } = useToast();
@@ -372,6 +432,8 @@ export default function SettingsPage() {
         <Settings size={18} className="text-harbor-600" />
         <h1 className="text-xl font-bold text-gray-900 dark:text-white">Settings</h1>
       </div>
+
+      <GeneralSection />
 
       <div className="card p-5 max-w-md">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Account</h2>

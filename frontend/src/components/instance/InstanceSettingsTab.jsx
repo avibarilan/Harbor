@@ -66,8 +66,8 @@ function CompanionSection({ inst, onRefresh }) {
     navigator.clipboard.writeText(token).then(() => toast('Copied!', 'success'));
   };
 
-  const isOnline = status?.online;
-  const isEnabled = inst.companion_enabled;
+  const isOnline = !!status?.online;
+  const isEnabled = !!inst.companion_enabled;
 
   return (
     <div className="space-y-4">
@@ -315,6 +315,8 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
           </button>
         </div>
       </form>
+
+      <hr className="border-t border-gray-200 dark:border-gray-700" />
 
       <CompanionSection inst={inst} onRefresh={handleRefresh} />
 

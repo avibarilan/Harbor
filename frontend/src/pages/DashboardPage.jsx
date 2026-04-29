@@ -1,8 +1,8 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus, ExternalLink, Anchor, PlugZap, Cloud,
-  ChevronDown, ChevronRight, LayoutGrid, AlignJustify, X, MapPin,
+  ChevronDown, ChevronRight, LayoutGrid, AlignJustify, X, MapPin, Filter,
 } from 'lucide-react';
 import { useSites } from '../context/SitesContext.jsx';
 import { useWs } from '../context/WsContext.jsx';
@@ -34,20 +34,12 @@ function PersonRow({ person }) {
   );
 }
 
-function StatCard({ label, value, variant = 'neutral' }) {
-  const styles = {
-    neutral: { value: 'var(--color-text-primary)',   bg: 'var(--color-bg-surface)' },
-    success: { value: 'var(--color-success)',         bg: 'var(--color-success-subtle)' },
-    warning: { value: 'var(--color-warning)',         bg: 'var(--color-warning-subtle)' },
-    danger:  { value: 'var(--color-danger)',          bg: 'var(--color-danger-subtle)' },
-  };
-  const s = styles[variant] ?? styles.neutral;
-
+function StatCard({ label, value, valueColor }) {
   return (
     <div
       className="flex flex-col gap-1 p-4"
       style={{
-        background:   s.bg,
+        background:   'var(--color-bg-surface)',
         border:       '1px solid var(--color-border)',
         borderRadius: 'var(--radius-lg)',
         boxShadow:    'var(--shadow-sm)',
@@ -55,7 +47,7 @@ function StatCard({ label, value, variant = 'neutral' }) {
     >
       <span
         className="font-bold leading-none"
-        style={{ color: s.value, fontSize: 'var(--text-3xl)' }}
+        style={{ color: valueColor || 'var(--color-text-primary)', fontSize: 'var(--text-3xl)' }}
       >
         {value}
       </span>
@@ -295,6 +287,19 @@ export default function DashboardPage() {
   const [locationFilter, setLocationFilter] = useState(null);
   const [companionFilter, setCompanionFilter] = useState(false);
   const [sections, setSections] = useState({ status: true, location: true, has: true });
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef(null);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    const handler = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [filterOpen]);
 
   const getStatus = useCallback(inst => statuses[inst.id] || inst.status || 'disconnected', [statuses]);
 
@@ -331,203 +336,227 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full">
-        <aside
-          className="w-[200px] shrink-0"
-          style={{ background: 'var(--color-bg-surface)', borderRight: '1px solid var(--color-border)' }}
-        />
-        <div className="flex-1 p-5">
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            {[...Array(4)].map((_, i) => (
-              <div
-                key={i}
-                className="h-20 rounded-xl animate-[skeleton-pulse_1.5s_ease_infinite]"
-                style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}
-              />
-            ))}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="h-32 rounded-xl animate-[skeleton-pulse_1.5s_ease_infinite]"
-                style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}
-              />
-            ))}
-          </div>
+      <div className="p-5">
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {[...Array(4)].map((_, i) => (
+            <div
+              key={i}
+              className="h-20 rounded-xl animate-[skeleton-pulse_1.5s_ease_infinite]"
+              style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}
+            />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <div
+              key={i}
+              className="h-32 rounded-xl animate-[skeleton-pulse_1.5s_ease_infinite]"
+              style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}
+            />
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-full">
-      {/* Filter panel */}
-      <aside
-        className="w-[200px] shrink-0 self-start sticky top-0 max-h-screen overflow-y-auto"
-        style={{ background: 'var(--color-bg-surface)', borderRight: '1px solid var(--color-border)' }}
-      >
-        <div className="py-1">
-          <FilterSection title="Status" open={sections.status} onToggle={() => setSections(s => ({ ...s, status: !s.status }))}>
-            <FilterRow label="Online"      count={counts.connected}    checked={statusFilters.has('connected')}    onChange={() => toggleStatus('connected')} />
-            <FilterRow label="Offline"     count={counts.disconnected} checked={statusFilters.has('disconnected')} onChange={() => toggleStatus('disconnected')} />
-            <FilterRow label="Auth Failed" count={counts.auth_failed}  checked={statusFilters.has('auth_failed')}  onChange={() => toggleStatus('auth_failed')} />
-          </FilterSection>
+    <div className="p-5">
+      {/* Hero stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Total Instances" value={instances.length} />
+        <StatCard
+          label="Online"
+          value={counts.connected}
+          valueColor={counts.connected > 0 ? 'var(--color-success)' : undefined}
+        />
+        <StatCard
+          label="Offline"
+          value={offlineCount}
+          valueColor={offlineCount > 0 ? 'var(--color-danger)' : undefined}
+        />
+        <StatCard label="Companion" value={counts.companion} />
+      </div>
 
-          {locations.length > 0 && (
-            <FilterSection title="Location" open={sections.location} onToggle={() => setSections(s => ({ ...s, location: !s.location }))}>
-              <FilterRow label="All" radio checked={locationFilter === null} onChange={() => setLocationFilter(null)} name="all" />
-              {locations.map(loc => (
-                <FilterRow
-                  key={loc.id}
-                  label={loc.name}
-                  count={instances.filter(i => i.location_id === loc.id).length}
-                  radio
-                  checked={locationFilter === loc.id}
-                  onChange={() => setLocationFilter(loc.id)}
-                  name={String(loc.id)}
-                />
-              ))}
-            </FilterSection>
-          )}
-
-          <FilterSection title="Has" open={sections.has} onToggle={() => setSections(s => ({ ...s, has: !s.has }))}>
-            <FilterRow label="Companion" count={counts.companion} checked={companionFilter} onChange={() => setCompanionFilter(v => !v)} />
-          </FilterSection>
-
+      {/* Controls */}
+      <div className="flex items-center justify-between mb-5 gap-4">
+        <div className="flex items-center gap-2" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
           {hasFilters && (
-            <div className="px-4 py-2">
-              <button
-                onClick={clearFilters}
-                className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70"
-                style={{ color: 'var(--color-accent)' }}
-              >
-                <X size={11} /> Clear filters
-              </button>
-            </div>
+            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
+              {filtered.length} of {instances.length} shown
+            </span>
           )}
         </div>
-      </aside>
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 p-5">
-        {/* Hero stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatCard label="Total Instances" value={instances.length} />
-          <StatCard
-            label="Online"
-            value={counts.connected}
-            variant={counts.connected > 0 ? 'success' : 'neutral'}
-          />
-          <StatCard
-            label="Offline"
-            value={offlineCount}
-            variant={offlineCount > 0 ? 'warning' : 'neutral'}
-          />
-          <StatCard label="Companion" value={counts.companion} />
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center justify-between mb-5 gap-4">
-          <div className="flex items-center gap-2" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-            {hasFilters && (
-              <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
-                {filtered.length} of {instances.length} shown
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <Link
-              to="/adopt"
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Filter button with popover */}
+          <div className="relative" ref={filterRef}>
+            <button
+              onClick={() => setFilterOpen(v => !v)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors"
               style={{
                 borderRadius: 'var(--radius-md)',
-                border: '1px dashed var(--color-accent)',
-                color: 'var(--color-accent)',
+                border: `1px solid ${hasFilters ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                background: hasFilters ? 'var(--color-accent-subtle)' : 'transparent',
+                color: hasFilters ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--color-accent-subtle)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              onMouseEnter={e => { if (!hasFilters) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+              onMouseLeave={e => { if (!hasFilters) e.currentTarget.style.background = 'transparent'; }}
             >
-              <Plus size={13} /> Add instance
-            </Link>
-            <div
-              className="flex overflow-hidden"
-              style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
-            >
-              {[['grid', LayoutGrid], ['list', AlignJustify]].map(([mode, Icon]) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className="p-1.5 transition-colors"
-                  title={`${mode} view`}
-                  style={{
-                    background: viewMode === mode ? 'var(--color-bg-hover)' : 'transparent',
-                    color: viewMode === mode ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
-                  }}
+              <Filter size={13} />
+              Filter
+              {hasFilters && (
+                <span
+                  className="flex items-center justify-center w-4 h-4 rounded-full text-white text-[10px] font-bold"
+                  style={{ background: 'var(--color-accent)', marginLeft: 2 }}
                 >
-                  <Icon size={14} />
-                </button>
-              ))}
-            </div>
+                  {statusFilters.size + (locationFilter !== null ? 1 : 0) + (companionFilter ? 1 : 0)}
+                </span>
+              )}
+            </button>
+
+            {filterOpen && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 w-56 overflow-hidden"
+                style={{
+                  background:   'var(--color-bg-surface)',
+                  border:       '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-lg)',
+                  boxShadow:    'var(--shadow-md)',
+                }}
+              >
+                <div className="py-1">
+                  <FilterSection title="Status" open={sections.status} onToggle={() => setSections(s => ({ ...s, status: !s.status }))}>
+                    <FilterRow label="Online"      count={counts.connected}    checked={statusFilters.has('connected')}    onChange={() => toggleStatus('connected')} />
+                    <FilterRow label="Offline"     count={counts.disconnected} checked={statusFilters.has('disconnected')} onChange={() => toggleStatus('disconnected')} />
+                    <FilterRow label="Auth Failed" count={counts.auth_failed}  checked={statusFilters.has('auth_failed')}  onChange={() => toggleStatus('auth_failed')} />
+                  </FilterSection>
+
+                  {locations.length > 0 && (
+                    <FilterSection title="Location" open={sections.location} onToggle={() => setSections(s => ({ ...s, location: !s.location }))}>
+                      <FilterRow label="All" radio checked={locationFilter === null} onChange={() => setLocationFilter(null)} name="all" />
+                      {locations.map(loc => (
+                        <FilterRow
+                          key={loc.id}
+                          label={loc.name}
+                          count={instances.filter(i => i.location_id === loc.id).length}
+                          radio
+                          checked={locationFilter === loc.id}
+                          onChange={() => setLocationFilter(loc.id)}
+                          name={String(loc.id)}
+                        />
+                      ))}
+                    </FilterSection>
+                  )}
+
+                  <FilterSection title="Has" open={sections.has} onToggle={() => setSections(s => ({ ...s, has: !s.has }))}>
+                    <FilterRow label="Companion" count={counts.companion} checked={companionFilter} onChange={() => setCompanionFilter(v => !v)} />
+                  </FilterSection>
+
+                  {hasFilters && (
+                    <div className="px-4 py-2" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                      <button
+                        onClick={() => { clearFilters(); setFilterOpen(false); }}
+                        className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70"
+                        style={{ color: 'var(--color-accent)' }}
+                      >
+                        <X size={11} /> Clear filters
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Link
+            to="/adopt"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors"
+            style={{
+              borderRadius: 'var(--radius-md)',
+              border: '1px dashed var(--color-accent)',
+              color: 'var(--color-accent)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--color-accent-subtle)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <Plus size={13} /> Add instance
+          </Link>
+          <div
+            className="flex overflow-hidden"
+            style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
+          >
+            {[['grid', LayoutGrid], ['list', AlignJustify]].map(([mode, Icon]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className="p-1.5 transition-colors"
+                title={`${mode} view`}
+                style={{
+                  background: viewMode === mode ? 'var(--color-bg-hover)' : 'transparent',
+                  color: viewMode === mode ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+                }}
+              >
+                <Icon size={14} />
+              </button>
+            ))}
           </div>
         </div>
-
-        {/* Empty state */}
-        {instances.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div
-              className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
-              style={{ background: 'var(--color-accent-subtle)', border: '1px solid rgba(37,99,235,0.2)' }}
-            >
-              <Anchor size={26} style={{ color: 'var(--color-accent)' }} />
-            </div>
-            <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
-              No instances yet
-            </h2>
-            <p className="mb-6" style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-              Add your first Home Assistant instance to get started.
-            </p>
-            <Link to="/adopt" className="btn-md btn-primary">Add Instance</Link>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <p className="mb-3" style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-              No instances match the current filters.
-            </p>
-            <button className="btn-md btn-secondary" onClick={clearFilters}>Clear filters</button>
-          </div>
-        ) : viewMode === 'list' ? (
-          <div
-            className="overflow-hidden"
-            style={{
-              background:   'var(--color-bg-surface)',
-              border:       '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            {filtered.map(inst => (
-              <ListRow
-                key={inst.id}
-                inst={inst}
-                liveStatus={getStatus(inst)}
-                location={inst.location_id ? locById[inst.location_id] : null}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filtered.map(inst => (
-              <GridCard
-                key={inst.id}
-                inst={inst}
-                liveStatus={getStatus(inst)}
-                location={inst.location_id ? locById[inst.location_id] : null}
-              />
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* Empty state */}
+      {instances.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
+            style={{ background: 'var(--color-accent-subtle)', border: '1px solid rgba(37,99,235,0.2)' }}
+          >
+            <Anchor size={26} style={{ color: 'var(--color-accent)' }} />
+          </div>
+          <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
+            No instances yet
+          </h2>
+          <p className="mb-6" style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+            Add your first Home Assistant instance to get started.
+          </p>
+          <Link to="/adopt" className="btn-md btn-primary">Add Instance</Link>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <p className="mb-3" style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+            No instances match the current filters.
+          </p>
+          <button className="btn-md btn-secondary" onClick={clearFilters}>Clear filters</button>
+        </div>
+      ) : viewMode === 'list' ? (
+        <div
+          className="overflow-hidden"
+          style={{
+            background:   'var(--color-bg-surface)',
+            border:       '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-lg)',
+          }}
+        >
+          {filtered.map(inst => (
+            <ListRow
+              key={inst.id}
+              inst={inst}
+              liveStatus={getStatus(inst)}
+              location={inst.location_id ? locById[inst.location_id] : null}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filtered.map(inst => (
+            <GridCard
+              key={inst.id}
+              inst={inst}
+              liveStatus={getStatus(inst)}
+              location={inst.location_id ? locById[inst.location_id] : null}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
