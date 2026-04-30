@@ -260,8 +260,10 @@ function HarborUpdatesSection() {
   const [versionInfo, setVersionInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [updateStarted, setUpdateStarted] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [polling, setPolling] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => { loadVersionInfo(); }, []);
@@ -280,9 +282,15 @@ function HarborUpdatesSection() {
 
   const handleCheckUpdates = async () => {
     setChecking(true);
+    setCheckResult(null);
     setError('');
     try {
-      setVersionInfo(await api.post('/harbor/check-updates'));
+      await api.post('/harbor/check-updates');
+      const fresh = await api.get('/harbor/version');
+      setVersionInfo(fresh);
+      setCheckResult(fresh.updateAvailable
+        ? `Version ${fresh.latestVersion} is available`
+        : 'You are up to date');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -291,16 +299,33 @@ function HarborUpdatesSection() {
   };
 
   const handleUpdate = async () => {
+    setUpdating(true);
+    setShowConfirm(false);
     setError('');
     try {
       await api.post('/harbor/update');
-      setShowConfirm(false);
-      setUpdateStarted(true);
+      setPolling(true);
     } catch (err) {
-      setShowConfirm(false);
+      setUpdating(false);
       setError(err.message);
     }
   };
+
+  useEffect(() => {
+    if (!polling) return;
+    const start = Date.now();
+    const maxWait = 3 * 60 * 1000;
+    const check = async () => {
+      if (Date.now() - start > maxWait) { setPolling(false); setUpdating(false); return; }
+      try {
+        await api.get('/harbor/version');
+        window.location.reload();
+      } catch {
+        setTimeout(check, 3000);
+      }
+    };
+    setTimeout(check, 15000);
+  }, [polling]);
 
   const formatDate = iso => iso ? new Date(iso).toLocaleString() : 'Never';
 
@@ -335,13 +360,13 @@ function HarborUpdatesSection() {
           <Download size={15} className="text-harbor-500" /> Harbor Updates
         </h2>
 
-        {updateStarted ? (
+        {(updating || polling) ? (
           <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 space-y-1">
             <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-              <RefreshCw size={15} className="animate-spin" /> Update in progress
+              <RefreshCw size={15} className="animate-spin" /> Updating… Harbor will restart shortly
             </div>
             <p className="text-xs text-blue-600 dark:text-blue-400 pl-5">
-              Harbor is restarting with the new version. Refresh this page in ~30 seconds.
+              Polling for restart — the page will reload automatically.
             </p>
           </div>
         ) : (
@@ -369,7 +394,13 @@ function HarborUpdatesSection() {
               </div>
             </div>
 
-            {versionInfo?.latestVersion && !versionInfo.updateAvailable && (
+            {checkResult && (
+              <div className={`flex items-center gap-1.5 text-xs ${versionInfo?.updateAvailable ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                <CheckCircle size={13} /> {checkResult}
+              </div>
+            )}
+
+            {versionInfo?.latestVersion && !versionInfo.updateAvailable && !checkResult && (
               <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                 <CheckCircle size={13} /> Harbor is up to date
               </div>
@@ -416,7 +447,7 @@ function HarborUpdatesSection() {
           <strong className="text-gray-900 dark:text-white">v{versionInfo?.latestVersion}</strong> and restart.
         </p>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          The new image will be pulled first (may take 1–2 minutes), then Harbor will restart. Refresh after ~30 seconds. Your data will not be affected.
+          The new image will be pulled first (may take 1–2 minutes), then Harbor will restart. The page will reload automatically. Your data will not be affected.
         </p>
       </ConfirmDialog>
     </>

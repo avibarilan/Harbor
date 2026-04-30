@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, HardDrive, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ExternalLink, HardDrive, Plus, RefreshCw, Trash2, Download, RotateCcw } from 'lucide-react';
 import { useToast } from '../../context/ToastContext.jsx';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
+
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 function PlaceholderView({ inst }) {
   return (
@@ -31,7 +33,10 @@ function FullBackupsView({ inst }) {
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [restoreConfirm, setRestoreConfirm] = useState(null);
   const [deleting, setDeleting] = useState({});
+  const [downloading, setDownloading] = useState({});
+  const [restoring, setRestoring] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,6 +81,45 @@ function FullBackupsView({ inst }) {
     }
   };
 
+  const handleDownload = async (backup) => {
+    setDownloading(d => ({ ...d, [backup.slug]: true }));
+    try {
+      toast('Downloading backup — this may take a moment…', 'success');
+      const result = await runCompanionCommand(inst.id, 'DOWNLOAD_BACKUP', { slug: backup.slug }, DOWNLOAD_TIMEOUT_MS);
+      if (!result?.content) throw new Error('No content returned from companion');
+
+      const bytes = atob(result.content);
+      const buf = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+      const blob = new Blob([buf], { type: 'application/x-tar' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${backup.slug}.tar`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setDownloading(d => ({ ...d, [backup.slug]: false }));
+    }
+  };
+
+  const handleRestore = async (slug) => {
+    setRestoring(r => ({ ...r, [slug]: true }));
+    try {
+      await runCompanionCommand(inst.id, 'RESTORE_BACKUP', { slug });
+      toast('Restore initiated — Home Assistant will restart', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setRestoring(r => ({ ...r, [slug]: false }));
+      setRestoreConfirm(null);
+    }
+  };
+
   return (
     <div className="p-6 max-w-2xl">
       <div className="flex items-center justify-between mb-4">
@@ -106,14 +150,32 @@ function FullBackupsView({ inst }) {
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{b.name || b.slug}</p>
                   <p className="text-xs text-gray-400">{date}{sizeMb ? ` · ${sizeMb}` : ''}</p>
                 </div>
-                <button
-                  onClick={() => setDeleteConfirm(b)}
-                  disabled={deleting[b.slug]}
-                  className="btn-ghost btn-sm text-gray-400 hover:text-red-600 dark:hover:text-red-400 shrink-0"
-                  title="Delete backup"
-                >
-                  {deleting[b.slug] ? <Spinner size="sm" /> : <Trash2 size={14} />}
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleDownload(b)}
+                    disabled={downloading[b.slug]}
+                    className="btn-ghost btn-sm text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
+                    title="Download backup"
+                  >
+                    {downloading[b.slug] ? <Spinner size="sm" /> : <Download size={14} />}
+                  </button>
+                  <button
+                    onClick={() => setRestoreConfirm(b)}
+                    disabled={restoring[b.slug]}
+                    className="btn-ghost btn-sm text-gray-400 hover:text-amber-600 dark:hover:text-amber-400"
+                    title="Restore backup"
+                  >
+                    {restoring[b.slug] ? <Spinner size="sm" /> : <RotateCcw size={14} />}
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm(b)}
+                    disabled={deleting[b.slug]}
+                    className="btn-ghost btn-sm text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                    title="Delete backup"
+                  >
+                    {deleting[b.slug] ? <Spinner size="sm" /> : <Trash2 size={14} />}
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -130,6 +192,22 @@ function FullBackupsView({ inst }) {
           onConfirm={() => handleDelete(deleteConfirm.slug)}
         >
           Delete backup <strong>{deleteConfirm.name || deleteConfirm.slug}</strong>? This cannot be undone.
+        </ConfirmDialog>
+      )}
+
+      {restoreConfirm && (
+        <ConfirmDialog
+          open
+          title="Restore backup"
+          confirmLabel="Restore"
+          danger
+          onClose={() => setRestoreConfirm(null)}
+          onConfirm={() => handleRestore(restoreConfirm.slug)}
+        >
+          <p>Are you sure you want to restore <strong>{restoreConfirm.name || restoreConfirm.slug}</strong>?</p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Home Assistant will restart and all current data will be replaced with this backup.
+          </p>
         </ConfirmDialog>
       )}
     </div>

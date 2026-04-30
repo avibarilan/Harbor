@@ -37,6 +37,7 @@ jobs:
             HARBOR_VERSION=${{ steps.version.outputs.VERSION }}
           tags: |
             avibarilan/harbor:latest
+            avibarilan/harbor:v${{ steps.version.outputs.VERSION }}
             avibarilan/harbor:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -115,6 +115,17 @@ async def download_backup_stream(slug: str):
     return await client.send(req, stream=True), client
 
 
+async def download_backup_b64(slug: str) -> str:
+    """Download backup and return as base64-encoded string."""
+    import base64
+    async with _client() as c:
+        r = await c.get(f"/backups/{slug}/download")
+        if not r.is_success:
+            raise SupervisorError(f"Supervisor {r.status_code}: {r.text}", r.status_code)
+        content = r.content
+    return base64.b64encode(content).decode("utf-8")
+
+
 async def get_updates() -> dict:
     core = await _get("/core/info")
     sup = await _get("/supervisor/info")

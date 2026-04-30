@@ -5,7 +5,7 @@ import { useSites } from '../../context/SitesContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import Spinner from '../ui/Spinner.jsx';
 import ConfirmDialog from '../ui/ConfirmDialog.jsx';
-import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Copy, WifiOff } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Trash2, PlugZap, Unplug, Copy, WifiOff, ExternalLink, ArrowUpCircle } from 'lucide-react';
 
 function timeAgo(dateStr) {
   if (!dateStr) return null;
@@ -17,6 +17,15 @@ function timeAgo(dateStr) {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
+function semverGt(a, b) {
+  const parse = v => v.replace(/^v/, '').split('.').map(Number);
+  const [aMaj, aMin, aPatch] = parse(a);
+  const [bMaj, bMin, bPatch] = parse(b);
+  if (aMaj !== bMaj) return aMaj > bMaj;
+  if (aMin !== bMin) return aMin > bMin;
+  return aPatch > bPatch;
+}
+
 function CompanionSection({ inst, onRefresh }) {
   const { toast } = useToast();
   const [status, setStatus] = useState(null);
@@ -24,6 +33,7 @@ function CompanionSection({ inst, onRefresh }) {
   const [token, setToken] = useState(null);
   const [disableConfirm, setDisableConfirm] = useState(false);
   const [disabling, setDisabling] = useState(false);
+  const [latestCompanionVersion, setLatestCompanionVersion] = useState(null);
 
   const needsReconfig = !!inst.companion_enabled && !inst.companion_last_seen;
 
@@ -31,6 +41,15 @@ function CompanionSection({ inst, onRefresh }) {
     if (!inst.companion_enabled) { setStatus(null); return; }
     api.get(`/instances/${inst.id}/companion/status`).then(setStatus).catch(() => {});
   }, [inst.id, inst.companion_enabled]);
+
+  useEffect(() => {
+    fetch('https://api.github.com/repos/avibarilan/Harbor/releases/latest')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.tag_name) setLatestCompanionVersion(data.tag_name.replace(/^v/, ''));
+      })
+      .catch(() => {});
+  }, []);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -66,19 +85,24 @@ function CompanionSection({ inst, onRefresh }) {
     navigator.clipboard.writeText(token).then(() => toast('Copied!', 'success'));
   };
 
-  const isOnline = !!status?.online;
+  const isOnline = status ? !!status.online : false;
   const isEnabled = !!inst.companion_enabled;
+  const companionVersion = status?.version || null;
+  const companionUpdateAvailable = companionVersion && latestCompanionVersion
+    ? semverGt(latestCompanionVersion, companionVersion)
+    : false;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Harbor Companion</h2>
-        {isEnabled && isOnline && (
-          <span className="badge badge-green flex items-center gap-1"><PlugZap size={10} /> Connected</span>
-        )}
-        {isEnabled && !isOnline && (
-          <span className="badge badge-yellow flex items-center gap-1"><WifiOff size={10} /> Offline</span>
-        )}
+        {isEnabled ? (
+          isOnline ? (
+            <span className="badge badge-green">Connected</span>
+          ) : (
+            <span className="badge badge-yellow">Offline</span>
+          )
+        ) : null}
       </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -102,7 +126,7 @@ function CompanionSection({ inst, onRefresh }) {
             <div className="text-sm text-green-600 dark:text-green-400 flex items-center gap-2">
               <PlugZap size={14} />
               <span>Connected</span>
-              {status?.version && <span className="text-gray-400 text-xs">v{status.version}</span>}
+              {companionVersion && <span className="text-gray-400 text-xs">v{companionVersion}</span>}
             </div>
             <button
               onClick={() => setDisableConfirm(true)}
@@ -113,6 +137,22 @@ function CompanionSection({ inst, onRefresh }) {
           </div>
           {status?.last_seen && (
             <p className="text-xs text-gray-400">Last seen {timeAgo(status.last_seen)}</p>
+          )}
+          {companionUpdateAvailable && (
+            <div className="flex items-center gap-2 pt-1 text-xs text-amber-600 dark:text-amber-400">
+              <ArrowUpCircle size={13} className="shrink-0" />
+              <span>
+                Companion update available: v{latestCompanionVersion} —{' '}
+                <a
+                  href="https://my.home-assistant.io/redirect/supervisor_addon/?addon=harbor_companion"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-amber-700 dark:hover:text-amber-300 inline-flex items-center gap-0.5"
+                >
+                  update via HA add-on store <ExternalLink size={10} />
+                </a>
+              </span>
+            </div>
           )}
         </div>
       ) : isEnabled && !isOnline && !needsReconfig ? (
@@ -265,7 +305,7 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-4">
+      <form id="instance-settings-form" onSubmit={handleSave} className="space-y-4">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Instance configuration</h2>
 
         <div>
@@ -306,15 +346,15 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
           )}
           {testError && <p className="text-sm text-red-600 dark:text-red-400">{testError}</p>}
         </div>
-
-        {saveError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{saveError}</p>}
-
-        <div className="flex justify-end">
-          <button type="submit" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
-            {saving && <Spinner size="sm" />} Save changes
-          </button>
-        </div>
       </form>
+
+      {saveError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2 -mt-4">{saveError}</p>}
+
+      <div className="flex justify-end -mt-4">
+        <button type="submit" form="instance-settings-form" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
+          {saving && <Spinner size="sm" />} Save changes
+        </button>
+      </div>
 
       <hr className="border-t border-gray-200 dark:border-gray-700" />
 

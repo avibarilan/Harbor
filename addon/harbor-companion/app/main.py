@@ -14,7 +14,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.2.0"
+VERSION = "1.4.0"
 OPTIONS_FILE = "/data/options.json"
 CONFIG_FILE = "/data/companion_config.json"
 
@@ -148,6 +148,17 @@ async def execute_command(command_id: int, command: str, payload: dict | None):
             if not slug:
                 raise ValueError("DELETE_BACKUP requires slug in payload")
             result = await sup.delete_backup(slug)
+        elif command == "DOWNLOAD_BACKUP":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("DOWNLOAD_BACKUP requires slug in payload")
+            content_b64 = await sup.download_backup_b64(slug)
+            result = {"content": content_b64}
+        elif command == "RESTORE_BACKUP":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("RESTORE_BACKUP requires slug in payload")
+            result = await sup.restore_backup(slug)
         else:
             error = f"Unknown command: {command}"
             status = "error"
