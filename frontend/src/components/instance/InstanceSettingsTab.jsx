@@ -346,14 +346,6 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
           )}
           {testError && <p className="text-sm text-red-600 dark:text-red-400">{testError}</p>}
         </div>
-
-        {saveError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{saveError}</p>}
-
-        <div className="flex justify-end">
-          <button type="submit" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
-            {saving && <Spinner size="sm" />} Save changes
-          </button>
-        </div>
       </form>
 
       <hr className="border-t border-gray-200 dark:border-gray-700" />
@@ -380,6 +372,14 @@ export default function InstanceSettingsTab({ inst, onSaved }) {
       >
         Remove <strong>{inst.name}</strong> from Harbor? This deletes all cached data for this instance. The Home Assistant installation itself is not affected.
       </ConfirmDialog>
+
+      {saveError && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{saveError}</p>}
+
+      <div className="flex justify-end">
+        <button type="submit" form="instance-settings-form" disabled={saving} className="btn-md btn-primary flex items-center gap-2">
+          {saving && <Spinner size="sm" />} Save changes
+        </button>
+      </div>
     </div>
   );
 }
