@@ -14,7 +14,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 OPTIONS_FILE = "/data/options.json"
 CONFIG_FILE = "/data/companion_config.json"
 

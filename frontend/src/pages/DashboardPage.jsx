@@ -38,6 +38,70 @@ function isActivityEvent(e) {
   return ACTIVITY_DOMAINS.has(domain);
 }
 
+function formatActivityText(e) {
+  const name = e.name || e.entity_id;
+  const domain = e.domain || (e.entity_id ? e.entity_id.split('.')[0] : '');
+  const state = e.state || '';
+  const dc = e.attributes?.device_class || '';
+
+  if (domain === 'light') {
+    if (state === 'on') return `${name} turned on`;
+    if (state === 'off') return `${name} turned off`;
+  }
+  if (domain === 'switch') {
+    if (state === 'on') return `${name} switched on`;
+    if (state === 'off') return `${name} switched off`;
+  }
+  if (domain === 'binary_sensor') {
+    if (dc === 'motion') return state === 'on' ? `${name} detected motion` : `${name} motion cleared`;
+    if (dc === 'door' || dc === 'window') return state === 'on' ? `${name} opened` : `${name} closed`;
+    if (dc === 'presence' || dc === 'occupancy') return state === 'on' ? `${name} occupied` : `${name} vacant`;
+    if (dc === 'smoke') return state === 'on' ? `${name} smoke detected!` : `${name} smoke cleared`;
+    if (dc === 'lock') return state === 'on' ? `${name} unlocked` : `${name} locked`;
+  }
+  if (domain === 'lock') {
+    if (state === 'locked') return `${name} locked`;
+    if (state === 'unlocked') return `${name} unlocked`;
+  }
+  if (domain === 'cover') {
+    if (state === 'open') return `${name} opened`;
+    if (state === 'closed') return `${name} closed`;
+    if (state === 'opening') return `${name} opening`;
+    if (state === 'closing') return `${name} closing`;
+  }
+  if (domain === 'climate') return `${name} set to ${state}`;
+  if (domain === 'media_player') {
+    if (state === 'playing') return `${name} started playing`;
+    if (state === 'paused') return `${name} paused`;
+    if (state === 'idle') return `${name} idle`;
+    if (state === 'off') return `${name} turned off`;
+  }
+  if (domain === 'alarm_control_panel') {
+    if (state === 'armed_away') return `${name} armed away`;
+    if (state === 'armed_home') return `${name} armed home`;
+    if (state === 'disarmed') return `${name} disarmed`;
+    if (state === 'triggered') return `${name} TRIGGERED`;
+  }
+  if (domain === 'fan') {
+    if (state === 'on') return `${name} turned on`;
+    if (state === 'off') return `${name} turned off`;
+  }
+  if (domain === 'input_boolean') {
+    if (state === 'on') return `${name} turned on`;
+    if (state === 'off') return `${name} turned off`;
+  }
+  if (domain === 'scene') return `${name} activated`;
+  if (domain === 'button') return `${name} pressed`;
+  if (domain === 'zone') {
+    if (state === 'home') return `${name} arrived home`;
+    if (state === 'not_home') return `${name} left home`;
+    return `${name} entered ${state}`;
+  }
+  if (state) return `${name} changed to ${state}`;
+  if (e.message) return `${name} ${e.message}`;
+  return name;
+}
+
 function useActivityFeed(instanceId, connected) {
   const [events, setEvents] = useState([]);
   const [hasNew, setHasNew] = useState(false);
@@ -56,7 +120,7 @@ function useActivityFeed(instanceId, connected) {
           const latest = filtered[filtered.length - 1];
           if (lastWhenRef.current !== null && latest.when !== lastWhenRef.current) {
             setHasNew(true);
-            setTimeout(() => { if (!cancelled) setHasNew(false); }, 2500);
+            setTimeout(() => { if (!cancelled) setHasNew(false); }, 3000);
           }
           lastWhenRef.current = latest.when;
         }
@@ -180,14 +244,14 @@ function GridCard({ inst, liveStatus, location }) {
           </div>
         )}
 
-        {(inst.cloudflare_proxied || inst.companion_enabled) && (
+        {(inst.cloudflare_proxied || (inst.companion_enabled && isConnected)) && (
           <div className="flex items-center gap-2 mt-2 ml-[18px]">
             {inst.cloudflare_proxied && (
               <Tooltip content="Cloudflare proxied">
                 <Cloud size={12} className="text-orange-400" />
               </Tooltip>
             )}
-            {inst.companion_enabled && (
+            {inst.companion_enabled && isConnected && (
               <Tooltip content="Companion connected">
                 <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />
               </Tooltip>
@@ -206,15 +270,10 @@ function GridCard({ inst, liveStatus, location }) {
       ) : isConnected && events.length > 0 ? (
         <div className="px-4 pb-2 pt-1.5 space-y-0.5" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
           {events.slice(-3).reverse().map((e, i) => (
-            <div key={i} className="flex items-center gap-1.5 min-w-0" style={{ opacity: 1 - i * 0.25 }}>
-              <span className="truncate" style={{ color: 'var(--color-text-secondary)', fontSize: '11px' }}>
-                {e.name || e.entity_id}
+            <div key={i} className="min-w-0" style={{ opacity: 1 - i * 0.25 }}>
+              <span className="truncate block" style={{ color: 'var(--color-text-secondary)', fontSize: '11px' }}>
+                {formatActivityText(e)}
               </span>
-              {e.message && (
-                <span className="shrink-0" style={{ color: 'var(--color-text-tertiary)', fontSize: '11px' }}>
-                  {e.message}
-                </span>
-              )}
             </div>
           ))}
         </div>
@@ -270,6 +329,9 @@ function ListRow({ inst, liveStatus, location }) {
         className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r"
         style={{ background: statusColor }}
       />
+      {hasNew && (
+        <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r activity-list-pulse" />
+      )}
       <StatusDot status={liveStatus} />
       <span
         className="font-medium flex-1 min-w-0 truncate"
@@ -288,7 +350,7 @@ function ListRow({ inst, liveStatus, location }) {
           className="hidden xl:block shrink-0 max-w-[200px] truncate activity-ticker"
           style={{ color: 'var(--color-text-tertiary)', fontSize: '11px' }}
         >
-          {latestEvent.name}: {latestEvent.message || latestEvent.state}
+          {formatActivityText(latestEvent)}
         </span>
       ) : inst.ha_version ? (
         <span className="font-mono shrink-0 hidden md:block" style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
@@ -297,7 +359,7 @@ function ListRow({ inst, liveStatus, location }) {
       ) : null}
       <div className="flex items-center gap-1.5 shrink-0">
         {inst.cloudflare_proxied && <Cloud size={12} className="text-orange-400" />}
-        {inst.companion_enabled && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
+        {inst.companion_enabled && liveStatus === 'connected' && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
       </div>
       <span className="shrink-0 hidden lg:block w-24 text-right" style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
         {liveStatus === 'connected' ? 'Connected' : inst.last_seen ? timeAgo(inst.last_seen) : '—'}

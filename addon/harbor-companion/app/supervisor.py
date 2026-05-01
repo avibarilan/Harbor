@@ -225,11 +225,11 @@ async def get_addon_logs(slug: str) -> str:
 
 async def get_addon_options(slug: str) -> dict:
     data = await _get(f"/addons/{slug}/options")
-    return data.get("data", {})
+    return data.get("data", {}).get("options", data.get("data", {}))
 
 
 async def set_addon_options(slug: str, options: dict) -> dict:
-    return await _post(f"/addons/{slug}/options", options)
+    return await _post(f"/addons/{slug}/options", {"options": options})
 
 
 async def get_logs() -> str:

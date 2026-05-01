@@ -78,8 +78,15 @@ router.get('/:id/logbook', async (req, res) => {
   const inst = getInstance(req.params.id);
   try {
     const start = req.query.start || new Date(Date.now() - 60000).toISOString();
-    const data = await haGet(inst, `/api/logbook/${encodeURIComponent(start)}`);
-    res.json(Array.isArray(data) ? data : []);
+    let path = `/api/logbook/${encodeURIComponent(start)}`;
+    const qs = [];
+    if (req.query.end) qs.push(`end_time=${encodeURIComponent(req.query.end)}`);
+    if (req.query.entity_id) qs.push(`entity_id=${encodeURIComponent(req.query.entity_id)}`);
+    if (qs.length) path += '?' + qs.join('&');
+    const data = await haGet(inst, path);
+    const arr = Array.isArray(data) ? data : [];
+    const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : arr.length;
+    res.json(arr.slice(-limit));
   } catch (e) {
     res.status(e.status || 500).json([]);
   }

@@ -127,9 +127,9 @@ function FullUpdatesView({ inst }) {
     const k = addonSlug || key;
     setUpdating(u => ({ ...u, [k]: true }));
     try {
-      await runCompanionCommand(inst.id, command, addonSlug ? { addon_slug: addonSlug } : undefined);
+      const result = await runCompanionCommand(inst.id, command, addonSlug ? { addon_slug: addonSlug } : undefined);
       toast(`${key} update triggered`, 'success');
-      setRestartRequired(true);
+      if (result?.restart_required === true) setRestartRequired(true);
       setTimeout(load, 8000);
     } catch (e) {
       toast(e.message, 'error');
@@ -147,7 +147,6 @@ function FullUpdatesView({ inst }) {
         service: 'install',
       });
       toast(`Update started for ${entity.attributes?.title || entity.attributes?.friendly_name || entity.entity_id}`, 'success');
-      setRestartRequired(true);
       setTimeout(load, 8000);
     } catch (e) {
       toast(e.message, 'error');

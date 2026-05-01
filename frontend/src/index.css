@@ -187,15 +187,24 @@
 
 /* ── Activity feed ────────────────────────────────────────────────── */
 @keyframes activity-glow {
-  0%   { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3), var(--shadow-sm); }
-  100% { box-shadow: var(--shadow-sm); }
+  0%   { box-shadow: var(--shadow-sm); border-color: var(--color-border); animation-timing-function: ease-in; }
+  30%  { box-shadow: 0 0 20px 6px rgba(37, 99, 235, 0.6), var(--shadow-sm); border-color: rgba(37, 99, 235, 0.8); animation-timing-function: ease-out; }
+  100% { box-shadow: var(--shadow-sm); border-color: var(--color-border); }
+}
+@keyframes activity-list-pulse {
+  0%   { background: rgba(37, 99, 235, 0); animation-timing-function: ease-in; }
+  30%  { background: rgba(37, 99, 235, 0.8); animation-timing-function: ease-out; }
+  100% { background: rgba(37, 99, 235, 0); }
 }
 @keyframes ticker-in {
   from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .activity-pulse {
-  animation: activity-glow 2.5s ease forwards;
+  animation: activity-glow 3s forwards;
+}
+.activity-list-pulse {
+  animation: activity-list-pulse 3s forwards;
 }
 .activity-ticker {
   animation: ticker-in 0.3s ease forwards;
