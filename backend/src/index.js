@@ -27,6 +27,8 @@ import searchRoutes from './routes/search.js';
 import auditRoutes from './routes/audit.js';
 import settingsRoutes from './routes/settings.js';
 import harborRoutes, { scheduleUpdateCheck } from './routes/harbor.js';
+import integrationsRoutes from './routes/integrations.js';
+import areasRoutes from './routes/areas.js';
 import companionRoutes, { companionPublicRouter } from './routes/companion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +57,8 @@ app.use('/api/search', searchRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/harbor', harborRoutes);
+app.use('/api/instances', integrationsRoutes);
+app.use('/api/instances', areasRoutes);
 app.use('/api/companion', companionPublicRouter);
 app.use('/api/instances', companionRoutes);
 

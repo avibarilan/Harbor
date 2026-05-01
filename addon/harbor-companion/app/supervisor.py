@@ -199,8 +199,37 @@ async def list_addons() -> list:
     ]
 
 
+async def start_addon(slug: str) -> dict:
+    return await _post(f"/addons/{slug}/start")
+
+
+async def stop_addon(slug: str) -> dict:
+    return await _post(f"/addons/{slug}/stop")
+
+
 async def restart_addon(slug: str) -> dict:
     return await _post(f"/addons/{slug}/restart")
+
+
+async def uninstall_addon(slug: str) -> dict:
+    return await _post(f"/addons/{slug}/uninstall")
+
+
+async def get_addon_logs(slug: str) -> str:
+    async with _client() as c:
+        r = await c.get(f"/addons/{slug}/logs")
+        if not r.is_success:
+            raise SupervisorError(f"Supervisor {r.status_code}: {r.text}", r.status_code)
+        return r.text
+
+
+async def get_addon_options(slug: str) -> dict:
+    data = await _get(f"/addons/{slug}/options")
+    return data.get("data", {})
+
+
+async def set_addon_options(slug: str, options: dict) -> dict:
+    return await _post(f"/addons/{slug}/options", options)
 
 
 async def get_logs() -> str:

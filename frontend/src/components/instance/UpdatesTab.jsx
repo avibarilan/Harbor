@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, RefreshCw, ArrowUp, CheckCircle } from 'lucide-react';
+import { ExternalLink, RefreshCw, ArrowUp, CheckCircle, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useToast } from '../../context/ToastContext.jsx';
 import { api } from '../../api/client.js';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
@@ -66,6 +66,8 @@ function FullUpdatesView({ inst }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updating, setUpdating] = useState({});
+  const [restartRequired, setRestartRequired] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,12 +110,26 @@ function FullUpdatesView({ inst }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleRestartNow = async () => {
+    setRestarting(true);
+    try {
+      await runCompanionCommand(inst.id, 'RESTART_HA');
+      toast('Home Assistant is restarting…', 'success');
+      setRestartRequired(false);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   const doUpdate = async (command, key, addonSlug) => {
     const k = addonSlug || key;
     setUpdating(u => ({ ...u, [k]: true }));
     try {
       await runCompanionCommand(inst.id, command, addonSlug ? { addon_slug: addonSlug } : undefined);
       toast(`${key} update triggered`, 'success');
+      setRestartRequired(true);
       setTimeout(load, 8000);
     } catch (e) {
       toast(e.message, 'error');
@@ -131,6 +147,7 @@ function FullUpdatesView({ inst }) {
         service: 'install',
       });
       toast(`Update started for ${entity.attributes?.title || entity.attributes?.friendly_name || entity.entity_id}`, 'success');
+      setRestartRequired(true);
       setTimeout(load, 8000);
     } catch (e) {
       toast(e.message, 'error');
@@ -154,6 +171,19 @@ function FullUpdatesView({ inst }) {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Updates</h2>
         <button onClick={load} className="btn-ghost btn-sm" title="Refresh"><RefreshCw size={14} /></button>
       </div>
+
+      {restartRequired && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-lg" style={{ background: 'var(--color-warning-subtle)', border: '1px solid rgba(210,153,34,0.3)' }}>
+          <AlertTriangle size={14} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
+          <span className="flex-1 text-xs" style={{ color: 'var(--color-warning)' }}>
+            Home Assistant restart required to complete the update.
+          </span>
+          <button onClick={handleRestartNow} disabled={restarting} className="btn-sm btn-secondary flex items-center gap-1.5 shrink-0">
+            {restarting ? <Spinner size="sm" /> : <RotateCcw size={11} />} Restart Now
+          </button>
+          <button onClick={() => setRestartRequired(false)} className="btn-sm btn-ghost shrink-0">Later</button>
+        </div>
+      )}
 
       {error ? (
         <div className="card p-8 text-center text-sm text-red-500 dark:text-red-400">{error}</div>

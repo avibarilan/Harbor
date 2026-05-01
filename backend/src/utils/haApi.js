@@ -42,6 +42,20 @@ export async function haPost(inst, path, body) {
   return res.json().catch(() => ({}));
 }
 
+export async function haPatch(inst, path, body) {
+  const token = getToken(inst);
+  const res = await fetch(`${baseUrl(inst)}${path}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw Object.assign(new Error(`HA API error ${res.status}: ${text}`), { status: res.status });
+  }
+  return res.json().catch(() => ({}));
+}
+
 export async function haDelete(inst, path) {
   const token = getToken(inst);
   const res = await fetch(`${baseUrl(inst)}${path}`, {

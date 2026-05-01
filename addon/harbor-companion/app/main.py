@@ -14,7 +14,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 OPTIONS_FILE = "/data/options.json"
 CONFIG_FILE = "/data/companion_config.json"
 
@@ -140,6 +140,42 @@ async def execute_command(command_id: int, command: str, payload: dict | None):
             if not slug:
                 raise ValueError("UPDATE_ADDON requires addon_slug in payload")
             result = await sup.update_addon(slug)
+        elif command == "ADDON_START":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_START requires slug in payload")
+            result = await sup.start_addon(slug)
+        elif command == "ADDON_STOP":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_STOP requires slug in payload")
+            result = await sup.stop_addon(slug)
+        elif command == "ADDON_RESTART":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_RESTART requires slug in payload")
+            result = await sup.restart_addon(slug)
+        elif command == "ADDON_UNINSTALL":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_UNINSTALL requires slug in payload")
+            result = await sup.uninstall_addon(slug)
+        elif command == "ADDON_GET_LOGS":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_GET_LOGS requires slug in payload")
+            result = await sup.get_addon_logs(slug)
+        elif command == "ADDON_GET_CONFIG":
+            slug = (payload or {}).get("slug")
+            if not slug:
+                raise ValueError("ADDON_GET_CONFIG requires slug in payload")
+            result = await sup.get_addon_options(slug)
+        elif command == "ADDON_SET_CONFIG":
+            slug = (payload or {}).get("slug")
+            options = (payload or {}).get("options")
+            if not slug:
+                raise ValueError("ADDON_SET_CONFIG requires slug in payload")
+            result = await sup.set_addon_options(slug, options or {})
         elif command == "BACKUP_NOW":
             name = (payload or {}).get("name", "harbor-backup")
             result = await sup.create_backup_named(name)

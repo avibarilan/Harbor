@@ -12,7 +12,9 @@ import EntitiesTab      from '../components/instance/EntitiesTab.jsx';
 import AutomationsTab   from '../components/instance/AutomationsTab.jsx';
 import ScriptsScenesTab from '../components/instance/ScriptsScenesTab.jsx';
 import UsersTab         from '../components/instance/UsersTab.jsx';
+import AreasTab         from '../components/instance/AreasTab.jsx';
 import AddonsTab        from '../components/instance/AddonsTab.jsx';
+import IntegrationsTab  from '../components/instance/IntegrationsTab.jsx';
 import UpdatesTab       from '../components/instance/UpdatesTab.jsx';
 import BackupsTab       from '../components/instance/BackupsTab.jsx';
 import SystemTab        from '../components/instance/SystemTab.jsx';
@@ -20,15 +22,17 @@ import InstanceSettingsTab from '../components/instance/InstanceSettingsTab.jsx'
 import clsx from 'clsx';
 
 const TABS = [
-  { key: 'entities',    label: 'Entities' },
-  { key: 'automations', label: 'Automations' },
-  { key: 'scripts',     label: 'Scripts & Scenes' },
-  { key: 'users',       label: 'Users' },
-  { key: 'addons',      label: 'Add-ons' },
-  { key: 'updates',     label: 'Updates' },
-  { key: 'backups',     label: 'Backups' },
-  { key: 'system',      label: 'System' },
-  { key: 'settings',    label: 'Settings' },
+  { key: 'entities',     label: 'Entities' },
+  { key: 'automations',  label: 'Automations' },
+  { key: 'scripts',      label: 'Scripts & Scenes' },
+  { key: 'users',        label: 'Users' },
+  { key: 'areas',        label: 'Areas' },
+  { key: 'addons',       label: 'Add-ons' },
+  { key: 'integrations', label: 'Integrations' },
+  { key: 'updates',      label: 'Updates' },
+  { key: 'backups',      label: 'Backups' },
+  { key: 'system',       label: 'System' },
+  { key: 'settings',     label: 'Settings' },
 ];
 
 function timeAgo(dateStr) {
@@ -245,15 +249,17 @@ export default function InstanceDetailPage() {
         key={activeTab}
         className="flex-1 overflow-y-auto min-h-0 animate-[tab-in_200ms_ease_forwards]"
       >
-        {activeTab === 'entities'    && <EntitiesTab      inst={instWithStatus} />}
-        {activeTab === 'automations' && <AutomationsTab   inst={instWithStatus} />}
-        {activeTab === 'scripts'     && <ScriptsScenesTab inst={instWithStatus} />}
-        {activeTab === 'users'       && <UsersTab         inst={instWithStatus} />}
-        {activeTab === 'addons'      && <AddonsTab        inst={instWithStatus} />}
-        {activeTab === 'updates'     && <UpdatesTab       inst={instWithStatus} />}
-        {activeTab === 'backups'     && <BackupsTab       inst={instWithStatus} />}
-        {activeTab === 'system'      && <SystemTab        inst={instWithStatus} />}
-        {activeTab === 'settings'    && <InstanceSettingsTab inst={inst} onSaved={refreshInst} />}
+        {activeTab === 'entities'     && <EntitiesTab      inst={instWithStatus} />}
+        {activeTab === 'automations'  && <AutomationsTab   inst={instWithStatus} />}
+        {activeTab === 'scripts'      && <ScriptsScenesTab inst={instWithStatus} />}
+        {activeTab === 'users'        && <UsersTab         inst={instWithStatus} />}
+        {activeTab === 'areas'        && <AreasTab         inst={instWithStatus} />}
+        {activeTab === 'addons'       && <AddonsTab        inst={instWithStatus} />}
+        {activeTab === 'integrations' && <IntegrationsTab  inst={instWithStatus} />}
+        {activeTab === 'updates'      && <UpdatesTab       inst={instWithStatus} />}
+        {activeTab === 'backups'      && <BackupsTab       inst={instWithStatus} />}
+        {activeTab === 'system'       && <SystemTab        inst={instWithStatus} />}
+        {activeTab === 'settings'     && <InstanceSettingsTab inst={inst} onSaved={refreshInst} />}
       </div>
     </div>
   );

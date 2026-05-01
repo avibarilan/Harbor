@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { api } from '../../api/client.js';
 import { runCompanionCommand } from '../../hooks/useCompanionCommand.js';
 import Spinner from '../ui/Spinner.jsx';
-import { Server, RefreshCw } from 'lucide-react';
+import { Server, RefreshCw, Settings, CheckCircle, RotateCcw } from 'lucide-react';
+import { useToast } from '../../context/ToastContext.jsx';
+import Modal from '../ui/Modal.jsx';
 
 function InfoRow({ label, value }) {
   if (value === null || value === undefined || value === '') return null;
@@ -53,6 +55,113 @@ function CompanionSystemInfo({ instanceId }) {
   );
 }
 
+const RELOAD_DOMAINS = [
+  { key: 'automation',     label: 'Automations' },
+  { key: 'script',         label: 'Scripts' },
+  { key: 'scene',          label: 'Scenes' },
+  { key: 'input_boolean',  label: 'Input Boolean' },
+  { key: 'input_select',   label: 'Input Select' },
+  { key: 'input_number',   label: 'Input Number' },
+  { key: 'input_text',     label: 'Input Text' },
+  { key: 'timer',          label: 'Timers' },
+  { key: 'schedule',       label: 'Schedules' },
+];
+
+function ConfigManagement({ instanceId }) {
+  const { toast } = useToast();
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState(null);
+  const [checkOpen, setCheckOpen] = useState(false);
+  const [reloading, setReloading] = useState({});
+
+  const configCheck = async () => {
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const result = await api.post(`/instances/${instanceId}/config-check`);
+      setCheckResult(result);
+      setCheckOpen(true);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const reloadAll = async () => {
+    setReloading(r => ({ ...r, _all: true }));
+    try {
+      await api.post(`/instances/${instanceId}/reload-yaml`);
+      toast('All YAML reloaded', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setReloading(r => ({ ...r, _all: false }));
+    }
+  };
+
+  const reloadDomain = async (domain) => {
+    setReloading(r => ({ ...r, [domain]: true }));
+    try {
+      await api.post(`/instances/${instanceId}/reload/${domain}`);
+      toast(`Reloaded ${domain}`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setReloading(r => ({ ...r, [domain]: false }));
+    }
+  };
+
+  const isValid = checkResult?.result === 'valid';
+
+  return (
+    <>
+      <div className="card p-4">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-3">
+          <Settings size={14} className="text-harbor-500" /> Configuration Management
+        </h3>
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={configCheck} disabled={checking} className="btn-sm btn-secondary flex items-center gap-1.5">
+            {checking ? <Spinner size="sm" /> : <CheckCircle size={12} />} Config Check
+          </button>
+          <button onClick={reloadAll} disabled={!!reloading._all} className="btn-sm btn-secondary flex items-center gap-1.5">
+            {reloading._all ? <Spinner size="sm" /> : <RotateCcw size={12} />} Reload All YAML
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Reload individual domains:</p>
+        <div className="flex flex-wrap gap-1.5">
+          {RELOAD_DOMAINS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => reloadDomain(key)}
+              disabled={!!reloading[key]}
+              className="btn-sm btn-ghost text-xs flex items-center gap-1"
+            >
+              {reloading[key] && <Spinner size="sm" />} {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Modal open={checkOpen} onClose={() => setCheckOpen(false)} title="Configuration Check" size="sm">
+        <div className="p-4">
+          {checkResult && (
+            <div className={`flex items-start gap-3 px-4 py-3 rounded-lg text-sm ${isValid ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'}`}>
+              <CheckCircle size={16} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">{isValid ? 'Configuration is valid' : 'Configuration errors found'}</p>
+                {!isValid && checkResult.errors && (
+                  <pre className="mt-2 text-xs whitespace-pre-wrap font-mono opacity-80">{checkResult.errors}</pre>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 export default function SystemTab({ inst }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +208,7 @@ export default function SystemTab({ inst }) {
         <InfoRow label="Language"          value={config.language} />
         {inst.companion_enabled && <CompanionSystemInfo instanceId={inst.id} />}
       </div>
+      {inst.companion_enabled && <ConfigManagement instanceId={inst.id} />}
     </div>
   );
 }

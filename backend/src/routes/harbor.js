@@ -26,26 +26,30 @@ function semverGt(a, b) {
   return aPatch > bPatch;
 }
 
-async function fetchLatestRelease() {
+async function fetchLatestDockerTag() {
   const res = await fetch(
-    `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-    { headers: { 'User-Agent': 'Harbor-UpdateChecker/1.0', Accept: 'application/vnd.github+json' } }
+    'https://hub.docker.com/v2/repositories/avibarilan/harbor/tags?page_size=50',
+    { headers: { 'User-Agent': 'Harbor-UpdateChecker/1.0' } }
   );
-  if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
-  return res.json();
+  if (!res.ok) throw new Error(`Docker Hub API returned ${res.status}`);
+  const data = await res.json();
+  const semverRe = /^v(\d+\.\d+\.\d+)$/;
+  let highest = null;
+  for (const tag of (data.results || [])) {
+    const m = semverRe.exec(tag.name);
+    if (m && (!highest || semverGt(m[1], highest))) highest = m[1];
+  }
+  if (!highest) throw new Error('No versioned tags found on Docker Hub');
+  return highest;
 }
 
 async function checkForUpdates() {
   try {
-    const release = await fetchLatestRelease();
-    const latestVersion = release.tag_name.replace(/^v/, '');
-
+    const latestVersion = await fetchLatestDockerTag();
     const db = getDb();
     const upsert = db.prepare('INSERT OR REPLACE INTO harbor_settings (key, value) VALUES (?, ?)');
     upsert.run('latest_version', JSON.stringify(latestVersion));
-    upsert.run('latest_release_url', JSON.stringify(release.html_url));
     upsert.run('last_update_check', JSON.stringify(new Date().toISOString()));
-
     console.log(`Harbor update check: current=${getCurrentVersion()}, latest=${latestVersion}`);
   } catch (err) {
     console.warn('Harbor update check failed:', err.message);
@@ -96,7 +100,8 @@ router.get('/version', async (req, res) => {
   const currentVersion = getCurrentVersion();
   const cached = getCachedUpdateInfo();
   const latestVersion = cached.latest_version || null;
-  const updateAvailable = latestVersion && currentVersion !== 'dev'
+  const isDevMode = currentVersion.toLowerCase() === 'dev';
+  const updateAvailable = latestVersion && !isDevMode
     ? semverGt(latestVersion, currentVersion)
     : false;
 
@@ -104,20 +109,21 @@ router.get('/version', async (req, res) => {
     version: currentVersion,
     latestVersion,
     updateAvailable,
-    releaseUrl: cached.latest_release_url || null,
+    releaseUrl: 'https://hub.docker.com/r/avibarilan/harbor/tags',
     lastChecked: cached.last_update_check || null,
     dockerAvailable: await isDockerAvailable(),
   });
 });
 
-// POST /api/harbor/check-updates  — manual refresh against GitHub API
+// POST /api/harbor/check-updates  — manual refresh against Docker Hub
 router.post('/check-updates', async (req, res) => {
   try {
     await checkForUpdates();
     const currentVersion = getCurrentVersion();
     const cached = getCachedUpdateInfo();
     const latestVersion = cached.latest_version || null;
-    const updateAvailable = latestVersion && currentVersion !== 'dev'
+    const isDevMode = currentVersion.toLowerCase() === 'dev';
+    const updateAvailable = latestVersion && !isDevMode
       ? semverGt(latestVersion, currentVersion)
       : false;
 
@@ -125,7 +131,7 @@ router.post('/check-updates', async (req, res) => {
       version: currentVersion,
       latestVersion,
       updateAvailable,
-      releaseUrl: cached.latest_release_url || null,
+      releaseUrl: 'https://hub.docker.com/r/avibarilan/harbor/tags',
       lastChecked: cached.last_update_check || null,
       dockerAvailable: await isDockerAvailable(),
     });

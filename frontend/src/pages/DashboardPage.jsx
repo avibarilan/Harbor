@@ -6,11 +6,51 @@ import {
 } from 'lucide-react';
 import { useSites } from '../context/SitesContext.jsx';
 import { useWs } from '../context/WsContext.jsx';
+import { api } from '../api/client.js';
 import StatusDot from '../components/ui/StatusDot.jsx';
 import InstanceActionButtons from '../components/ui/InstanceActionButtons.jsx';
 import Tooltip from '../components/ui/Tooltip.jsx';
 import { usePeoplePresence } from '../hooks/useInstanceMeta.js';
 import clsx from 'clsx';
+
+const NOISY_DOMAINS = new Set([
+  'sun', 'weather', 'homeassistant', 'update', 'recorder',
+  'persistent_notification', 'zone', 'device_tracker',
+]);
+
+function useActivityFeed(instanceId, connected) {
+  const [events, setEvents] = useState([]);
+  const [hasNew, setHasNew] = useState(false);
+  const lastWhenRef = useRef(null);
+
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const data = await api.get(`/instances/${instanceId}/logbook`);
+        if (cancelled || !Array.isArray(data)) return;
+        const filtered = data.filter(e => e.entity_id && !NOISY_DOMAINS.has(e.domain)).slice(-5);
+        if (filtered.length > 0) {
+          const latest = filtered[filtered.length - 1];
+          if (lastWhenRef.current !== null && latest.when !== lastWhenRef.current) {
+            setHasNew(true);
+            setTimeout(() => { if (!cancelled) setHasNew(false); }, 2500);
+          }
+          lastWhenRef.current = latest.when;
+        }
+        setEvents(filtered);
+      } catch {}
+    };
+
+    poll();
+    const interval = setInterval(poll, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [instanceId, connected]);
+
+  return { events, hasNew };
+}
 
 function timeAgo(dateStr) {
   if (!dateStr) return null;
@@ -62,11 +102,12 @@ function GridCard({ inst, liveStatus, location }) {
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
   const { people, load: loadPeople } = usePeoplePresence(inst.id, liveStatus, hovered);
+  const { events, hasNew } = useActivityFeed(inst.id, liveStatus === 'connected');
   const isConnected = liveStatus === 'connected';
 
   return (
     <div
-      className="flex flex-col cursor-pointer overflow-hidden"
+      className={clsx('flex flex-col cursor-pointer overflow-hidden', hasNew && 'activity-pulse')}
       style={{
         background:   'var(--color-bg-surface)',
         border:       '1px solid var(--color-border)',
@@ -135,14 +176,29 @@ function GridCard({ inst, liveStatus, location }) {
         )}
       </div>
 
-      {hovered && isConnected && people && people.length > 0 && (
+      {hovered && isConnected && people && people.length > 0 ? (
         <div
           className="people-panel px-4 pb-2 pt-1"
           style={{ borderTop: '1px solid var(--color-border-subtle)' }}
         >
           {people.map(p => <PersonRow key={p.entity_id} person={p} />)}
         </div>
-      )}
+      ) : isConnected && events.length > 0 ? (
+        <div className="px-4 pb-2 pt-1.5 space-y-0.5" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+          {events.slice(-3).reverse().map((e, i) => (
+            <div key={i} className="flex items-center gap-1.5 min-w-0" style={{ opacity: 1 - i * 0.25 }}>
+              <span className="truncate" style={{ color: 'var(--color-text-secondary)', fontSize: '11px' }}>
+                {e.name || e.entity_id}
+              </span>
+              {e.message && (
+                <span className="shrink-0" style={{ color: 'var(--color-text-tertiary)', fontSize: '11px' }}>
+                  {e.message}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div
         className="px-4 py-2.5 flex items-center justify-between"
@@ -173,6 +229,8 @@ function GridCard({ inst, liveStatus, location }) {
 
 function ListRow({ inst, liveStatus, location }) {
   const navigate = useNavigate();
+  const { events, hasNew } = useActivityFeed(inst.id, liveStatus === 'connected');
+  const latestEvent = events.length > 0 ? events[events.length - 1] : null;
 
   const statusColor = {
     connected:    'var(--color-success)',
@@ -204,11 +262,19 @@ function ListRow({ inst, liveStatus, location }) {
           {location.name}
         </span>
       )}
-      {inst.ha_version && (
+      {latestEvent ? (
+        <span
+          key={latestEvent.when}
+          className="hidden xl:block shrink-0 max-w-[200px] truncate activity-ticker"
+          style={{ color: 'var(--color-text-tertiary)', fontSize: '11px' }}
+        >
+          {latestEvent.name}: {latestEvent.message || latestEvent.state}
+        </span>
+      ) : inst.ha_version ? (
         <span className="font-mono shrink-0 hidden md:block" style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
           {inst.ha_version}
         </span>
-      )}
+      ) : null}
       <div className="flex items-center gap-1.5 shrink-0">
         {inst.cloudflare_proxied && <Cloud size={12} className="text-orange-400" />}
         {inst.companion_enabled && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}

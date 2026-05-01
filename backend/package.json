@@ -1,6 +1,6 @@
 {
   "name": "harbor-backend",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Harbor - Multi-Home Assistant Management Platform",
   "type": "module",
   "main": "src/index.js",
