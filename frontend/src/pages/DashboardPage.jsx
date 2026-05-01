@@ -13,10 +13,30 @@ import Tooltip from '../components/ui/Tooltip.jsx';
 import { usePeoplePresence } from '../hooks/useInstanceMeta.js';
 import clsx from 'clsx';
 
-const NOISY_DOMAINS = new Set([
-  'sun', 'weather', 'homeassistant', 'update', 'recorder',
-  'persistent_notification', 'zone', 'device_tracker',
+const ACTIVITY_DOMAINS = new Set([
+  'light', 'switch', 'climate', 'cover', 'lock', 'alarm_control_panel',
+  'fan', 'media_player', 'input_boolean', 'button', 'scene',
 ]);
+const BINARY_SENSOR_CLASSES = new Set([
+  'motion', 'door', 'window', 'smoke', 'moisture', 'vibration',
+  'presence', 'occupancy', 'lock',
+]);
+const NOISE_WORDS = ['time', 'date', 'uptime', 'cpu', 'memory', 'disk'];
+const EXCLUDED_DOMAINS = new Set(['sensor', 'sun', 'update', 'weather']);
+
+function isActivityEvent(e) {
+  if (!e.entity_id) return false;
+  const domain = e.domain || e.entity_id.split('.')[0];
+  if (EXCLUDED_DOMAINS.has(domain)) return false;
+  const haystack = ((e.name || '') + ' ' + e.entity_id).toLowerCase();
+  if (NOISE_WORDS.some(w => haystack.includes(w))) return false;
+  if (domain === 'binary_sensor') {
+    const nameAndId = (e.entity_id.split('.')[1] + ' ' + (e.name || '')).toLowerCase();
+    return BINARY_SENSOR_CLASSES.has(e.attributes?.device_class) ||
+      [...BINARY_SENSOR_CLASSES].some(cls => nameAndId.includes(cls));
+  }
+  return ACTIVITY_DOMAINS.has(domain);
+}
 
 function useActivityFeed(instanceId, connected) {
   const [events, setEvents] = useState([]);
@@ -31,7 +51,7 @@ function useActivityFeed(instanceId, connected) {
       try {
         const data = await api.get(`/instances/${instanceId}/logbook`);
         if (cancelled || !Array.isArray(data)) return;
-        const filtered = data.filter(e => e.entity_id && !NOISY_DOMAINS.has(e.domain)).slice(-5);
+        const filtered = data.filter(isActivityEvent).slice(-5);
         if (filtered.length > 0) {
           const latest = filtered[filtered.length - 1];
           if (lastWhenRef.current !== null && latest.when !== lastWhenRef.current) {
@@ -403,8 +423,8 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="p-5">
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {[...Array(4)].map((_, i) => (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          {[...Array(3)].map((_, i) => (
             <div
               key={i}
               className="h-20 rounded-xl animate-[skeleton-pulse_1.5s_ease_infinite]"
@@ -428,7 +448,7 @@ export default function DashboardPage() {
   return (
     <div className="p-5">
       {/* Hero stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className={`grid gap-3 mb-6 ${counts.companion > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
         <StatCard label="Total Instances" value={instances.length} />
         <StatCard
           label="Online"
@@ -440,7 +460,7 @@ export default function DashboardPage() {
           value={offlineCount}
           valueColor={offlineCount > 0 ? 'var(--color-danger)' : undefined}
         />
-        <StatCard label="Companion" value={counts.companion} />
+        {counts.companion > 0 && <StatCard label="Companion" value={counts.companion} />}
       </div>
 
       {/* Controls */}
