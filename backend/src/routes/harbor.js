@@ -8,8 +8,7 @@ import Docker from 'dockerode';
 const router = Router();
 router.use(requireAuth);
 
-const GITHUB_REPO = 'avibarilan/Harbor';
-const DOCKER_IMAGE = 'ghcr.io/avibarilan/harbor';
+const DOCKER_IMAGE = 'avibarilan/harbor';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 function getCurrentVersion() {
@@ -157,7 +156,7 @@ router.post('/update', async (req, res) => {
     return res.status(400).json({ error: 'Already running the latest version.' });
   }
 
-  const newImageName = `${DOCKER_IMAGE}:v${latestVersion}`;
+  const newImageName = `${DOCKER_IMAGE}:latest`;
 
   try {
     const docker = getDocker();
