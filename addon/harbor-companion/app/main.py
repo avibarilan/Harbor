@@ -14,7 +14,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 OPTIONS_FILE = "/data/options.json"
 CONFIG_FILE = "/data/companion_config.json"
 
@@ -169,13 +169,24 @@ async def execute_command(command_id: int, command: str, payload: dict | None):
             slug = (payload or {}).get("slug")
             if not slug:
                 raise ValueError("ADDON_GET_CONFIG requires slug in payload")
-            result = await sup.get_addon_options(slug)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"http://supervisor/addons/{slug}/options",
+                    headers={"Authorization": f"Bearer {sup.SUPERVISOR_TOKEN}", "Content-Type": "application/json"},
+                )
+            result = response.json().get("data", {})
         elif command == "ADDON_SET_CONFIG":
             slug = (payload or {}).get("slug")
-            options = (payload or {}).get("options")
             if not slug:
                 raise ValueError("ADDON_SET_CONFIG requires slug in payload")
-            result = await sup.set_addon_options(slug, options or {})
+            options = (payload or {}).get("options", payload)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"http://supervisor/addons/{slug}/options",
+                    headers={"Authorization": f"Bearer {sup.SUPERVISOR_TOKEN}", "Content-Type": "application/json"},
+                    json={"options": options},
+                )
+            result = {"success": response.status_code == 200}
         elif command == "BACKUP_NOW":
             name = (payload or {}).get("name", "harbor-backup")
             result = await sup.create_backup_named(name)

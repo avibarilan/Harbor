@@ -1,5 +1,5 @@
 name: Harbor Companion
-version: "1.5.2"
+version: "1.5.3"
 slug: harbor_companion
 description: Bridge between Harbor Fleet Manager and Home Assistant Supervisor API
 url: https://github.com/avibarilan/Harbor

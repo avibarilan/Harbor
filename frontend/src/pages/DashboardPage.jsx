@@ -200,8 +200,6 @@ function GridCard({ inst, liveStatus, location }) {
   const { people, load: loadPeople } = usePeoplePresence(inst.id, liveStatus, hovered);
   const { events, hasNew } = useActivityFeed(inst.id, liveStatus === 'connected');
   const isConnected = liveStatus === 'connected';
-  const companionOnline = inst.companion_enabled && inst.companion_last_seen &&
-    (Date.now() - new Date(inst.companion_last_seen).getTime() < 60000);
 
   return (
     <div
@@ -258,14 +256,14 @@ function GridCard({ inst, liveStatus, location }) {
           </div>
         )}
 
-        {(inst.cloudflare_proxied || companionOnline) && (
+        {(inst.cloudflare_proxied || inst.companion_online) && (
           <div className="flex items-center gap-2 mt-2 ml-[18px]">
             {inst.cloudflare_proxied && (
               <Tooltip content="Cloudflare proxied">
                 <Cloud size={12} className="text-orange-400" />
               </Tooltip>
             )}
-            {companionOnline && (
+            {inst.companion_online && (
               <Tooltip content="Companion connected">
                 <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />
               </Tooltip>
@@ -344,7 +342,7 @@ function ListRow({ inst, liveStatus, location }) {
         style={{ background: statusColor }}
       />
       {hasNew && (
-        <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r activity-list-pulse" />
+        <div className="absolute left-0 top-0 bottom-0 rounded-r activity-list-pulse" />
       )}
       <StatusDot status={liveStatus} />
       <span
@@ -373,7 +371,7 @@ function ListRow({ inst, liveStatus, location }) {
       ) : null}
       <div className="flex items-center gap-1.5 shrink-0">
         {inst.cloudflare_proxied && <Cloud size={12} className="text-orange-400" />}
-        {inst.companion_enabled && inst.companion_last_seen && (Date.now() - new Date(inst.companion_last_seen).getTime() < 60000) && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
+        {inst.companion_online && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
       </div>
       <span className="shrink-0 hidden lg:block w-24 text-right" style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
         {liveStatus === 'connected' ? 'Connected' : inst.last_seen ? timeAgo(inst.last_seen) : '—'}
@@ -481,7 +479,7 @@ export default function DashboardPage() {
     connected:    instances.filter(i => getStatus(i) === 'connected').length,
     disconnected: instances.filter(i => getStatus(i) === 'disconnected').length,
     auth_failed:  instances.filter(i => getStatus(i) === 'auth_failed').length,
-    companion:    instances.filter(i => i.companion_enabled).length,
+    companion:    instances.filter(i => i.companion_online).length,
   }), [instances, getStatus]);
 
   const filtered = useMemo(() => instances.filter(inst => {
@@ -554,7 +552,7 @@ export default function DashboardPage() {
   return (
     <div className="p-5">
       {/* Hero stats */}
-      <div className={`grid gap-3 mb-6 ${counts.companion > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <StatCard label="Total Instances" value={instances.length} />
         <StatCard
           label="Online"
@@ -566,7 +564,7 @@ export default function DashboardPage() {
           value={offlineCount}
           valueColor={offlineCount > 0 ? 'var(--color-danger)' : undefined}
         />
-        {counts.companion > 0 && <StatCard label="Companion" value={counts.companion} />}
+        <StatCard label="Companion" value={counts.companion} />
       </div>
 
       {/* Controls */}

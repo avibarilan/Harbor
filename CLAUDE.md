@@ -151,12 +151,12 @@ git tag v1.2.0 && git push origin main --tags
 Triggers on `v*` tags. It:
 1. Verifies the tag version matches the `VERSION` file
 2. Builds a multi-platform Docker image (`linux/amd64`, `linux/arm64`) with `--build-arg VERSION=<semver>`
-3. Pushes to GHCR as `ghcr.io/avibarilan/harbor:latest` and `ghcr.io/avibarilan/harbor:v<version>`
+3. Pushes to Docker Hub as `avibarilan/harbor:latest` and `avibarilan/harbor:v<version>`
 
-`GITHUB_TOKEN` is used automatically — no extra secrets needed.
+Requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets in GitHub Actions.
 
 ### Self-update mechanism
-- On startup (after 15 s) and every 6 hours, Harbor checks `https://api.github.com/repos/avibarilan/Harbor/releases/latest` and caches the result in `harbor_settings`.
+- On startup (after 15 s) and every 6 hours, Harbor checks `https://hub.docker.com/v2/repositories/avibarilan/harbor/tags?page_size=50` and caches the result in `harbor_settings`.
 - Settings page → **Harbor Updates** section shows current/latest version and a "Check for updates" button.
 - When an update is available and the Docker socket is mounted, an **"Update to vX.X.X"** button appears.
 - Clicking it: Harbor pulls the new image, then launches a short-lived **helper container** (using the new image running `src/updateRunner.js`). The helper waits 8 s, stops + removes the old container, and starts the new one with the original port/volume/env config. The Docker socket must be mounted at `/var/run/docker.sock`.

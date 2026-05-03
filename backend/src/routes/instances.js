@@ -34,7 +34,12 @@ const INST_COLS = 'id, site_id, location_id, name, url, installation_type, statu
 
 router.get('/', (req, res) => {
   const instances = getDb().prepare(`SELECT ${INST_COLS} FROM instances ORDER BY name`).all();
-  res.json(instances);
+  const now = Date.now();
+  res.json(instances.map(inst => ({
+    ...inst,
+    companion_online: inst.companion_enabled === 1 && !!inst.companion_last_seen &&
+      (now - new Date(inst.companion_last_seen).getTime() < 60_000),
+  })));
 });
 
 router.post('/', async (req, res) => {
