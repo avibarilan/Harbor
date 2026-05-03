@@ -224,8 +224,8 @@ async def get_addon_logs(slug: str) -> str:
 
 
 async def get_addon_options(slug: str) -> dict:
-    data = await _get(f"/addons/{slug}/options")
-    return data.get("data", {}).get("options", data.get("data", {}))
+    data = await _get(f"/addons/{slug}/info")
+    return data.get("data", {}).get("options", {})
 
 
 async def set_addon_options(slug: str, options: dict) -> dict:

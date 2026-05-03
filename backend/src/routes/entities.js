@@ -7,6 +7,8 @@ import { logAudit } from '../utils/audit.js';
 const router = Router();
 router.use(requireAuth);
 
+const areasCache = new Map(); // instanceId -> { data, expiry }
+
 router.get('/:id/entities', (req, res) => {
   const { domain } = req.query;
   let query = 'SELECT * FROM entity_cache WHERE instance_id = ?';
@@ -30,26 +32,42 @@ router.get('/:id/entities', (req, res) => {
 
 router.get('/:id/entities/areas', async (req, res) => {
   const inst = getInstance(req.params.id);
+
+  const cached = areasCache.get(inst.id);
+  if (cached && cached.expiry > Date.now()) {
+    return res.json(cached.data);
+  }
+
   try {
-    const [areasResult, entitiesResult] = await Promise.allSettled([
+    const [areasResult, entitiesResult, devicesResult] = await Promise.allSettled([
       callHaWs(inst, { type: 'config/area_registry/list' }),
       callHaWs(inst, { type: 'config/entity_registry/list' }),
+      callHaWs(inst, { type: 'config/device_registry/list' }),
     ]);
 
     const areas = areasResult.status === 'fulfilled' ? (areasResult.value || []) : [];
     const entityEntries = entitiesResult.status === 'fulfilled' ? (entitiesResult.value || []) : [];
+    const deviceEntries = devicesResult.status === 'fulfilled' ? (devicesResult.value || []) : [];
 
     const areaMap = {};
     for (const area of areas) {
       if (area.area_id) areaMap[area.area_id] = area.name;
     }
 
-    const entityAreas = {};
-    for (const entity of entityEntries) {
-      if (entity.area_id) entityAreas[entity.entity_id] = entity.area_id;
+    const deviceAreaMap = {};
+    for (const device of deviceEntries) {
+      if (device.id && device.area_id) deviceAreaMap[device.id] = device.area_id;
     }
 
-    res.json({ areas: areaMap, entity_areas: entityAreas });
+    const entityAreas = {};
+    for (const entity of entityEntries) {
+      const areaId = entity.area_id || (entity.device_id ? deviceAreaMap[entity.device_id] : null);
+      if (areaId) entityAreas[entity.entity_id] = areaId;
+    }
+
+    const result = { areas: areaMap, entity_areas: entityAreas };
+    areasCache.set(inst.id, { data: result, expiry: Date.now() + 60_000 });
+    res.json(result);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }

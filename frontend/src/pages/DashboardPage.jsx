@@ -53,11 +53,23 @@ function formatActivityText(e) {
     if (state === 'off') return `${name} switched off`;
   }
   if (domain === 'binary_sensor') {
+    const entityPart = e.entity_id ? (e.entity_id.split('.')[1] || '') : '';
+    const haystack = (entityPart + ' ' + name).toLowerCase();
     if (dc === 'motion') return state === 'on' ? `${name} detected motion` : `${name} motion cleared`;
+    if (dc === 'occupancy' || dc === 'presence') return state === 'on' ? `${name} occupied` : `${name} vacant`;
     if (dc === 'door' || dc === 'window') return state === 'on' ? `${name} opened` : `${name} closed`;
-    if (dc === 'presence' || dc === 'occupancy') return state === 'on' ? `${name} occupied` : `${name} vacant`;
     if (dc === 'smoke') return state === 'on' ? `${name} smoke detected!` : `${name} smoke cleared`;
+    if (dc === 'moisture') return state === 'on' ? `${name} wet` : `${name} dry`;
+    if (dc === 'vibration') return state === 'on' ? `${name} vibration detected` : `${name} vibration cleared`;
     if (dc === 'lock') return state === 'on' ? `${name} unlocked` : `${name} locked`;
+    if (haystack.includes('motion') || haystack.includes('pir') || haystack.includes('instant_motion'))
+      return state === 'on' ? `${name} detected motion` : `${name} motion cleared`;
+    if (haystack.includes('occupancy') || haystack.includes('presence'))
+      return state === 'on' ? `${name} occupied` : `${name} vacant`;
+    if (haystack.includes('door') || haystack.includes('window'))
+      return state === 'on' ? `${name} opened` : `${name} closed`;
+    if (haystack.includes('smoke')) return state === 'on' ? `${name} smoke detected!` : `${name} smoke cleared`;
+    if (haystack.includes('moisture')) return state === 'on' ? `${name} wet` : `${name} dry`;
   }
   if (domain === 'lock') {
     if (state === 'locked') return `${name} locked`;
@@ -188,6 +200,8 @@ function GridCard({ inst, liveStatus, location }) {
   const { people, load: loadPeople } = usePeoplePresence(inst.id, liveStatus, hovered);
   const { events, hasNew } = useActivityFeed(inst.id, liveStatus === 'connected');
   const isConnected = liveStatus === 'connected';
+  const companionOnline = inst.companion_enabled && inst.companion_last_seen &&
+    (Date.now() - new Date(inst.companion_last_seen).getTime() < 60000);
 
   return (
     <div
@@ -244,14 +258,14 @@ function GridCard({ inst, liveStatus, location }) {
           </div>
         )}
 
-        {(inst.cloudflare_proxied || (inst.companion_enabled && isConnected)) && (
+        {(inst.cloudflare_proxied || companionOnline) && (
           <div className="flex items-center gap-2 mt-2 ml-[18px]">
             {inst.cloudflare_proxied && (
               <Tooltip content="Cloudflare proxied">
                 <Cloud size={12} className="text-orange-400" />
               </Tooltip>
             )}
-            {inst.companion_enabled && isConnected && (
+            {companionOnline && (
               <Tooltip content="Companion connected">
                 <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />
               </Tooltip>
@@ -359,7 +373,7 @@ function ListRow({ inst, liveStatus, location }) {
       ) : null}
       <div className="flex items-center gap-1.5 shrink-0">
         {inst.cloudflare_proxied && <Cloud size={12} className="text-orange-400" />}
-        {inst.companion_enabled && liveStatus === 'connected' && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
+        {inst.companion_enabled && inst.companion_last_seen && (Date.now() - new Date(inst.companion_last_seen).getTime() < 60000) && <PlugZap size={12} style={{ color: 'var(--color-accent)' }} />}
       </div>
       <span className="shrink-0 hidden lg:block w-24 text-right" style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)' }}>
         {liveStatus === 'connected' ? 'Connected' : inst.last_seen ? timeAgo(inst.last_seen) : '—'}
@@ -437,6 +451,18 @@ export default function DashboardPage() {
   const [sections, setSections] = useState({ status: true, location: true, has: true });
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef(null);
+  const [collapsedLocations, setCollapsedLocations] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('harbor_location_collapsed') || '[]')); }
+    catch { return new Set(); }
+  });
+  const toggleLocation = (key) => {
+    setCollapsedLocations(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem('harbor_location_collapsed', JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!filterOpen) return;
@@ -481,6 +507,24 @@ export default function DashboardPage() {
   });
 
   const locById = useMemo(() => Object.fromEntries(locations.map(l => [l.id, l])), [locations]);
+
+  const groupedByLocation = useMemo(() => {
+    if (locations.length === 0) return null;
+    const byLoc = Object.fromEntries(locations.map(l => [l.id, []]));
+    const ungrouped = [];
+    for (const inst of filtered) {
+      if (inst.location_id !== null && inst.location_id !== undefined && byLoc[inst.location_id] !== undefined) {
+        byLoc[inst.location_id].push(inst);
+      } else {
+        ungrouped.push(inst);
+      }
+    }
+    const groups = locations
+      .filter(l => byLoc[l.id].length > 0)
+      .map(l => ({ id: l.id, name: l.name, instances: byLoc[l.id] }));
+    if (ungrouped.length > 0) groups.push({ id: null, name: 'Ungrouped', instances: ungrouped });
+    return groups;
+  }, [filtered, locations]);
 
   if (loading) {
     return (
@@ -684,26 +728,87 @@ export default function DashboardPage() {
             borderRadius: 'var(--radius-lg)',
           }}
         >
-          {filtered.map(inst => (
-            <ListRow
-              key={inst.id}
-              inst={inst}
-              liveStatus={getStatus(inst)}
-              location={inst.location_id ? locById[inst.location_id] : null}
-            />
-          ))}
+          {groupedByLocation ? (
+            groupedByLocation.map(group => {
+              const key = String(group.id ?? 'ungrouped');
+              const isCollapsed = collapsedLocations.has(key);
+              return (
+                <div key={key}>
+                  <button
+                    className="flex items-center gap-2 w-full px-5 py-2"
+                    style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
+                    onClick={() => toggleLocation(key)}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    {isCollapsed
+                      ? <ChevronRight size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                      : <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />}
+                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {group.name}
+                    </span>
+                    <div className="flex-1 h-px ml-2" style={{ background: 'var(--color-border)' }} />
+                  </button>
+                  {!isCollapsed && group.instances.map(inst => (
+                    <ListRow key={inst.id} inst={inst} liveStatus={getStatus(inst)} location={null} />
+                  ))}
+                </div>
+              );
+            })
+          ) : (
+            filtered.map(inst => (
+              <ListRow
+                key={inst.id}
+                inst={inst}
+                liveStatus={getStatus(inst)}
+                location={inst.location_id ? locById[inst.location_id] : null}
+              />
+            ))
+          )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filtered.map(inst => (
-            <GridCard
-              key={inst.id}
-              inst={inst}
-              liveStatus={getStatus(inst)}
-              location={inst.location_id ? locById[inst.location_id] : null}
-            />
-          ))}
-        </div>
+        groupedByLocation ? (
+          <div>
+            {groupedByLocation.map(group => {
+              const key = String(group.id ?? 'ungrouped');
+              const isCollapsed = collapsedLocations.has(key);
+              return (
+                <div key={key} className="mb-6 last:mb-0">
+                  <button
+                    className="flex items-center gap-2 w-full mb-3"
+                    onClick={() => toggleLocation(key)}
+                  >
+                    {isCollapsed
+                      ? <ChevronRight size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                      : <ChevronDown size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />}
+                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {group.name}
+                    </span>
+                    <div className="flex-1 h-px ml-2" style={{ background: 'var(--color-border)' }} />
+                  </button>
+                  {!isCollapsed && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {group.instances.map(inst => (
+                        <GridCard key={inst.id} inst={inst} liveStatus={getStatus(inst)} location={null} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {filtered.map(inst => (
+              <GridCard
+                key={inst.id}
+                inst={inst}
+                liveStatus={getStatus(inst)}
+                location={inst.location_id ? locById[inst.location_id] : null}
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   );

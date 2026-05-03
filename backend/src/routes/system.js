@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getDb } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getInstance, haGet, haPost } from '../utils/haApi.js';
 import { logAudit } from '../utils/audit.js';
@@ -86,7 +87,28 @@ router.get('/:id/logbook', async (req, res) => {
     const data = await haGet(inst, path);
     const arr = Array.isArray(data) ? data : [];
     const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : arr.length;
-    res.json(arr.slice(-limit));
+    const slice = arr.slice(-limit);
+
+    // Enrich binary_sensor events with device_class from entity cache
+    const db = getDb();
+    const stmt = db.prepare('SELECT attributes_json FROM entity_cache WHERE instance_id = ? AND entity_id = ?');
+    const enriched = slice.map(event => {
+      const domain = event.domain || (event.entity_id ? event.entity_id.split('.')[0] : '');
+      if (domain === 'binary_sensor' && event.entity_id && !event.attributes?.device_class) {
+        const row = stmt.get(inst.id, event.entity_id);
+        if (row) {
+          try {
+            const attrs = JSON.parse(row.attributes_json || '{}');
+            if (attrs.device_class) {
+              return { ...event, attributes: { ...(event.attributes || {}), device_class: attrs.device_class } };
+            }
+          } catch {}
+        }
+      }
+      return event;
+    });
+
+    res.json(enriched);
   } catch (e) {
     res.status(e.status || 500).json([]);
   }
