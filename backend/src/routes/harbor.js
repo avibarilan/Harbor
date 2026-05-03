@@ -74,12 +74,59 @@ async function isDockerAvailable() {
   }
 }
 
-function getContainerId() {
+function getHostname() {
   try {
     return fs.readFileSync('/etc/hostname', 'utf8').trim();
   } catch {
     return null;
   }
+}
+
+// Tries three methods in order: container named "harbor", hostname match, image match.
+// Returns the full container ID string, or null if nothing found.
+async function findHarborContainer(docker) {
+  // Method 1: container named exactly "harbor"
+  try {
+    const list = await docker.listContainers({ all: true });
+    const byName = list.find(c => c.Names?.some(n => n === '/harbor'));
+    if (byName) {
+      console.log(`Harbor: found container by name "harbor" (${byName.Id.slice(0, 12)})`);
+      return byName.Id;
+    }
+  } catch {}
+
+  // Method 2: /etc/hostname — Docker sets this to the short container ID by default;
+  //            compose setups may set a custom hostname that matches the service name instead.
+  const hostname = getHostname();
+  if (hostname) {
+    try {
+      await docker.getContainer(hostname).inspect();
+      console.log(`Harbor: found container by hostname "${hostname}" (${hostname.slice(0, 12)})`);
+      return hostname;
+    } catch {
+      // hostname didn't resolve directly; try a name-contains match
+      try {
+        const list = await docker.listContainers({ all: true });
+        const match = list.find(c => c.Names?.some(n => n.includes(hostname)));
+        if (match) {
+          console.log(`Harbor: found container by hostname match "${hostname}" (${match.Id.slice(0, 12)})`);
+          return match.Id;
+        }
+      } catch {}
+    }
+  }
+
+  // Method 3: any running container whose image contains "avibarilan/harbor"
+  try {
+    const list = await docker.listContainers({ all: false });
+    const byImage = list.find(c => c.Image?.includes('avibarilan/harbor'));
+    if (byImage) {
+      console.log(`Harbor: found container by image "avibarilan/harbor" (${byImage.Id.slice(0, 12)})`);
+      return byImage.Id;
+    }
+  } catch {}
+
+  return null;
 }
 
 function getCachedUpdateInfo() {
@@ -171,15 +218,16 @@ router.post('/update', async (req, res) => {
     });
     console.log('Harbor: image pull complete');
 
-    // 2. Inspect the current container to replicate its config
-    const containerId = getContainerId();
+    // 2. Locate this container so we can replicate its config
+    const containerId = await findHarborContainer(docker);
     if (!containerId) {
-      return res.status(500).json({ error: 'Could not determine current container ID.' });
+      return res.status(500).json({ error: 'Could not locate the Harbor container. Check Docker socket access.' });
     }
 
     const container = docker.getContainer(containerId);
     const inspect = await container.inspect();
     const containerName = inspect.Name.replace(/^\//, '');
+    console.log(`Harbor: will replace container "${containerName}" (${containerId.slice(0, 12)})`);
 
     // 3. Build the config for the replacement container
     const newContainerConfig = {
