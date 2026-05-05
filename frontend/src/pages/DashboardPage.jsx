@@ -536,7 +536,7 @@ export default function DashboardPage() {
             />
           ))}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
           {[...Array(6)].map((_, i) => (
             <div
               key={i}
@@ -785,7 +785,7 @@ export default function DashboardPage() {
                     <div className="flex-1 h-px ml-2" style={{ background: 'var(--color-border)' }} />
                   </button>
                   {!isCollapsed && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-7">
                       {group.instances.map(inst => (
                         <GridCard key={inst.id} inst={inst} liveStatus={getStatus(inst)} location={null} />
                       ))}
@@ -796,7 +796,7 @@ export default function DashboardPage() {
             })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-7">
             {filtered.map(inst => (
               <GridCard
                 key={inst.id}

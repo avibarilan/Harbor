@@ -130,8 +130,18 @@ export function initDb() {
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_last_seen DATETIME DEFAULT NULL"); } catch {}
   try { db.exec("ALTER TABLE instances ADD COLUMN companion_version TEXT DEFAULT NULL"); } catch {}
 
-  const companionCount = db.prepare("SELECT COUNT(*) as count FROM instances WHERE companion_enabled = 1").get();
-  console.log(`[Harbor DB] Companion-enabled instances on startup: ${companionCount.count}`);
+  // Companion data integrity check — logs state to verify persistence across redeploys
+  try {
+    const companionRows = db.prepare(
+      "SELECT id, name, companion_enabled, companion_last_seen, companion_version FROM instances WHERE companion_enabled = 1"
+    ).all();
+    console.log(`[Harbor DB] Found ${companionRows.length} instances with companion enabled`);
+    for (const row of companionRows) {
+      console.log(`[Harbor DB]   Instance ${row.id} "${row.name}": last_seen=${row.companion_last_seen || 'never'}, version=${row.companion_version || 'unknown'}`);
+    }
+  } catch (e) {
+    console.warn('[Harbor DB] Could not verify companion data integrity:', e.message);
+  }
 
   return db;
 }

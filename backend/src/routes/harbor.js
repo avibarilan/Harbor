@@ -186,7 +186,7 @@ router.post('/check-updates', async (req, res) => {
   }
 });
 
-// POST /api/harbor/update  — pull new image and hot-swap the container
+// POST /api/harbor/update  — pull new image and restart the container
 router.post('/update', async (req, res) => {
   if (!(await isDockerAvailable())) {
     return res.status(503).json({ error: 'Docker socket not available. Manual update required.' });
@@ -208,68 +208,77 @@ router.post('/update', async (req, res) => {
   try {
     const docker = getDocker();
 
-    // 1. Pull the new image (may take 30–120 s on slow connections)
-    console.log(`Harbor: pulling ${newImageName}…`);
-    await new Promise((resolve, reject) => {
-      docker.pull(newImageName, (err, stream) => {
-        if (err) return reject(err);
-        docker.modem.followProgress(stream, (err) => (err ? reject(err) : resolve()));
-      });
-    });
-    console.log('Harbor: image pull complete');
-
-    // 2. Locate this container so we can replicate its config
-    const containerId = await findHarborContainer(docker);
-    if (!containerId) {
-      return res.status(500).json({ error: 'Could not locate the Harbor container. Check Docker socket access.' });
+    // Verify Docker socket is accessible before proceeding
+    try {
+      await docker.ping();
+      console.log('Harbor update: Docker socket ping OK');
+    } catch (err) {
+      console.error('Harbor update: Docker socket ping failed:', err.message);
+      return res.status(503).json({ error: `Docker socket unreachable: ${err.message}` });
     }
 
-    const container = docker.getContainer(containerId);
-    const inspect = await container.inspect();
-    const containerName = inspect.Name.replace(/^\//, '');
-    console.log(`Harbor: will replace container "${containerName}" (${containerId.slice(0, 12)})`);
+    // 1. Pull the new image (may take 30–120 s on slow connections)
+    console.log(`Harbor update: pulling ${newImageName}…`);
+    try {
+      await new Promise((resolve, reject) => {
+        docker.pull(newImageName, (err, stream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, (err) => (err ? reject(err) : resolve()));
+        });
+      });
+    } catch (err) {
+      console.error('Harbor update: image pull failed:', err.message);
+      return res.status(500).json({ error: `Image pull failed: ${err.message}` });
+    }
+    console.log('Harbor update: image pull complete');
 
-    // 3. Build the config for the replacement container
-    const newContainerConfig = {
-      name: containerName,
-      Image: newImageName,
-      Env: inspect.Config.Env,
-      ExposedPorts: inspect.Config.ExposedPorts,
-      Labels: inspect.Config.Labels,
-      HostConfig: {
-        Binds: inspect.HostConfig.Binds,
-        PortBindings: inspect.HostConfig.PortBindings,
-        RestartPolicy: inspect.HostConfig.RestartPolicy,
-        NetworkMode: inspect.HostConfig.NetworkMode,
-      },
-    };
+    // 2. Locate this container using three methods in priority order
+    let containerId;
+    try {
+      containerId = await findHarborContainer(docker);
+    } catch (err) {
+      console.error('Harbor update: container lookup threw:', err.message);
+      return res.status(500).json({ error: `Container lookup error: ${err.message}` });
+    }
+
+    if (!containerId) {
+      console.error('Harbor update: could not find harbor container via any method');
+      return res.status(500).json({ error: 'Could not find harbor container — please restart manually' });
+    }
+
+    console.log(`Harbor update: target container ID: ${containerId.slice(0, 12)}`);
 
     logAudit({
       action: 'harbor_update_started',
       details: JSON.stringify({ from: currentVersion, to: latestVersion }),
     });
 
-    // 4. Launch the update-runner helper using the NEW image.
-    //    The helper sleeps 8 s, stops the old container, removes it, and starts a new one.
-    //    It runs in its own container (outside our PID namespace) so it survives our shutdown.
-    const configB64 = Buffer.from(JSON.stringify(newContainerConfig)).toString('base64');
-
-    const helper = await docker.createContainer({
-      Image: newImageName,
-      Cmd: ['node', 'src/updateRunner.js'],
-      Env: [
-        `OLD_CONTAINER_ID=${containerId}`,
-        `NEW_CONTAINER_CONFIG_B64=${configB64}`,
-      ],
-      HostConfig: {
-        Binds: ['/var/run/docker.sock:/var/run/docker.sock'],
-        AutoRemove: true,
-      },
-    });
-    await helper.start();
-
-    // 5. Respond before the helper kills us (~8 s from now)
+    // 3. Respond to the client before restarting
     res.json({ ok: true, version: latestVersion });
+
+    // 4. Restart sequence — runs after the response is flushed
+    setImmediate(async () => {
+      const container = docker.getContainer(containerId);
+      try {
+        console.log('Harbor update: stopping container (timeout 10s)…');
+        await container.stop({ t: 10 });
+        console.log('Harbor update: container stopped');
+      } catch (err) {
+        if (err.statusCode === 304) {
+          console.log('Harbor update: container already stopped, proceeding to start…');
+        } else {
+          console.error('Harbor update: stop failed:', err.message);
+        }
+      }
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        console.log('Harbor update: starting container…');
+        await container.start();
+        console.log('Harbor update: container started');
+      } catch (err) {
+        console.error('Harbor update: start failed:', err.message);
+      }
+    });
   } catch (err) {
     console.error('Harbor update failed:', err);
     if (!res.headersSent) res.status(500).json({ error: err.message });

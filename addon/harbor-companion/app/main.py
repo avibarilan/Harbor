@@ -14,7 +14,7 @@ import supervisor as sup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("harbor-companion")
 
-VERSION = "1.5.3"
+VERSION = "1.5.5"
 OPTIONS_FILE = "/data/options.json"
 CONFIG_FILE = "/data/companion_config.json"
 
@@ -174,19 +174,31 @@ async def execute_command(command_id: int, command: str, payload: dict | None):
                     f"http://supervisor/addons/{slug}/options",
                     headers={"Authorization": f"Bearer {sup.SUPERVISOR_TOKEN}", "Content-Type": "application/json"},
                 )
-            result = response.json().get("data", {})
+            log.info(f"ADDON_GET_CONFIG raw response ({response.status_code}): {response.text[:500]}")
+            try:
+                body = response.json()
+            except Exception as e:
+                raise ValueError(f"Supervisor returned non-JSON response: {response.text[:200]}")
+            data = body.get("data", {})
+            result = data.get("options", data) if data else body.get("options", body)
         elif command == "ADDON_SET_CONFIG":
             slug = (payload or {}).get("slug")
             if not slug:
                 raise ValueError("ADDON_SET_CONFIG requires slug in payload")
-            options = (payload or {}).get("options", payload)
+            options = (payload or {}).get("options", {})
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"http://supervisor/addons/{slug}/options",
                     headers={"Authorization": f"Bearer {sup.SUPERVISOR_TOKEN}", "Content-Type": "application/json"},
                     json={"options": options},
                 )
-            result = {"success": response.status_code == 200}
+            log.info(f"ADDON_SET_CONFIG raw response ({response.status_code}): {response.text[:500]}")
+            try:
+                body = response.json()
+                success = body.get("result") == "ok"
+            except Exception:
+                success = response.status_code == 200
+            result = {"success": success}
         elif command == "BACKUP_NOW":
             name = (payload or {}).get("name", "harbor-backup")
             result = await sup.create_backup_named(name)
